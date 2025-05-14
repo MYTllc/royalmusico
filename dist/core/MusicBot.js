@@ -12,7 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.PlayerStatus = exports.LoopMode = exports.MusicBot = void 0;
 const events_1 = require("events");
 const YouTubeDLWrapper_1 = require("../integrations/YouTubeDLWrapper");
-const SpotifyClient_1 = require("../integrations/SpotifyClient"); // Import SpotifyClient
+const SpotifyClient_1 = require("../integrations/SpotifyClient");
 const AudioPlayer_1 = require("../player/AudioPlayer");
 Object.defineProperty(exports, "PlayerStatus", { enumerable: true, get: function () { return AudioPlayer_1.PlayerStatus; } });
 const QueueManager_1 = require("../queue/QueueManager");
@@ -35,59 +35,64 @@ class MusicBot extends events_1.EventEmitter {
         this.setupInternalHandlers();
     }
     setupEventForwarding() {
-        this.audioPlayer.on("trackStart", (track) => this.emit("trackStart", track));
-        this.audioPlayer.on("trackEnd", (track) => this.emit("trackEnd", track, "finished"));
-        this.audioPlayer.on("error", (error, track) => this.emit("trackError", error, track));
-        this.audioPlayer.on("pause", (track) => this.emit("paused", track));
-        this.audioPlayer.on("resume", (track) => this.emit("resumed", track));
-        this.audioPlayer.on("stop", (track) => this.emit("stopped", track));
-        this.audioPlayer.on("volumeChange", (volume) => this.emit("volumeChanged", volume));
+        this.audioPlayer.on("trackStart", (track, context) => this.emit("trackStart", track, context));
+        this.audioPlayer.on("trackEnd", (track, reason, context) => this.emit("trackEnd", track, reason, context));
+        this.audioPlayer.on("error", (error, track, context) => this.emit("trackError", error, track, context));
+        this.audioPlayer.on("pause", (track, context) => this.emit("paused", track, context));
+        this.audioPlayer.on("resume", (track, context) => this.emit("resumed", track, context));
+        this.audioPlayer.on("stop", (track, context) => this.emit("stopped", track, context));
+        this.audioPlayer.on("volumeChange", (volume, context) => this.emit("volumeChanged", volume, context));
         this.audioPlayer.on("queueEndCheck", () => this.handleQueueEndCheck());
-        this.queueManager.on("trackAdded", (track, size) => this.emit("trackAdded", track, size));
-        this.queueManager.on("trackRemoved", (track, size) => this.emit("trackRemoved", track, size));
-        this.queueManager.on("queueEnd", () => this.emit("queueEnd"));
-        this.queueManager.on("queueLooped", () => this.emit("queueLooped"));
-        this.queueManager.on("loopModeChanged", (mode) => this.emit("loopModeChanged", mode));
-        this.queueManager.on("queueShuffled", () => this.emit("shuffled"));
-        this.queueManager.on("queueCleared", () => this.emit("queueCleared"));
-        this.queueManager.on("error", (error) => this.emit("trackError", error, this.queueManager.nowPlaying));
+        this.queueManager.on("trackAdded", (track, size, context) => this.emit("trackAdded", track, size, context));
+        this.queueManager.on("trackRemoved", (track, size, context) => this.emit("trackRemoved", track, size, context));
+        this.queueManager.on("queueEnd", (context) => this.emit("queueEnd", context));
+        this.queueManager.on("queueLooped", (context) => this.emit("queueLooped", context));
+        this.queueManager.on("loopModeChanged", (mode, context) => this.emit("loopModeChanged", mode, context));
+        this.queueManager.on("queueShuffled", (context) => this.emit("shuffled", context));
+        this.queueManager.on("queueCleared", (context) => this.emit("queueCleared", context));
+        this.queueManager.on("error", (error, context) => this.emit("trackError", error, this.queueManager.nowPlaying, context));
     }
     setupInternalHandlers() {
-        this.on("trackEnd", (_track, reason) => __awaiter(this, void 0, void 0, function* () {
-            this.emit("debug", `Track ended. Reason: ${reason}. Checking for next track.`);
-            this.playNextTrack();
+        this.on("trackEnd", (_track, reason, context) => __awaiter(this, void 0, void 0, function* () {
+            this.emit("debug", `Track ended. Reason: ${reason}. Checking for next track.`, { context });
+            this.playNextTrack(context);
         }));
     }
-    playNextTrack() {
+    playNextTrack(previousTrackContext) {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.PLAYING && this.queueManager.getLoopMode() !== QueueManager_1.LoopMode.TRACK) {
-                this.emit("debug", "Player is already playing and not in track loop. playNextTrack aborted.");
+                this.emit("debug", "Player is already playing and not in track loop. playNextTrack aborted.", { context: previousTrackContext });
                 return;
             }
             const nextTrack = this.queueManager.getNext();
             if (nextTrack) {
                 try {
+                    // Ensure metadata from the original command context is preserved or set if track is from programmatic play
+                    const trackContext = nextTrack.metadata || previousTrackContext;
+                    if (!nextTrack.metadata && trackContext) {
+                        nextTrack.metadata = trackContext;
+                    }
                     if (!nextTrack.streamUrl) {
-                        this.emit("debug", `Fetching stream URL for next track: ${nextTrack.title}`);
+                        this.emit("debug", `Fetching stream URL for next track: ${nextTrack.title}`, { context: trackContext });
                         if (nextTrack.source === "spotify") {
                             const query = `${nextTrack.artist} ${nextTrack.title}`;
-                            this.emit("debug", `Spotify track detected, searching for streamable source for \"${query}\"`);
+                            this.emit("debug", `Spotify track detected, searching for streamable source for \"${query}\"`, { context: trackContext });
                             const ytTrack = yield this.youtubeDLWrapper.getTrackInfo(`ytsearch1:${query}`);
                             if (ytTrack && ytTrack.url) {
                                 const streamUrlResult = yield this.youtubeDLWrapper.getStreamUrl(ytTrack.url);
                                 nextTrack.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
-                                this.emit("debug", `Found YouTube stream for Spotify track: ${nextTrack.streamUrl}`);
+                                this.emit("debug", `Found YouTube stream for Spotify track: ${nextTrack.streamUrl}`, { context: trackContext });
                             }
                             else {
                                 const scResults = yield this.youtubeDLWrapper.searchSoundCloud(query, 1);
                                 if (scResults && scResults.length > 0 && scResults[0].url) {
                                     const streamUrlResult = yield this.youtubeDLWrapper.getStreamUrl(scResults[0].url);
                                     nextTrack.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
-                                    this.emit("debug", `Found SoundCloud stream for Spotify track: ${nextTrack.streamUrl}`);
+                                    this.emit("debug", `Found SoundCloud stream for Spotify track: ${nextTrack.streamUrl}`, { context: trackContext });
                                 }
                                 else {
-                                    this.emit("trackError", new Error(`Could not find streamable source for Spotify track: ${nextTrack.title}`), nextTrack);
-                                    this.playNextTrack();
+                                    this.emit("trackError", new Error(`Could not find streamable source for Spotify track: ${nextTrack.title}`), nextTrack, trackContext);
+                                    this.playNextTrack(trackContext);
                                     return;
                                 }
                             }
@@ -97,27 +102,32 @@ class MusicBot extends events_1.EventEmitter {
                             nextTrack.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
                         }
                         if (!nextTrack.streamUrl) {
-                            this.emit("trackError", new Error(`Failed to get stream URL for ${nextTrack.title}`), nextTrack);
-                            this.playNextTrack();
+                            this.emit("trackError", new Error(`Failed to get stream URL for ${nextTrack.title}`), nextTrack, trackContext);
+                            this.playNextTrack(trackContext);
                             return;
                         }
                     }
-                    yield this.audioPlayer.play(nextTrack);
+                    yield this.audioPlayer.play(nextTrack); // nextTrack should have its metadata correctly set
                 }
                 catch (error) {
-                    this.emit("trackError", error, nextTrack);
-                    this.playNextTrack();
+                    this.emit("trackError", error, nextTrack, (nextTrack === null || nextTrack === void 0 ? void 0 : nextTrack.metadata) || previousTrackContext);
+                    this.playNextTrack((nextTrack === null || nextTrack === void 0 ? void 0 : nextTrack.metadata) || previousTrackContext);
                 }
             }
             else {
-                this.emit("debug", "Queue is empty and no loop active. Playback stopped.");
+                this.emit("debug", "Queue is empty and no loop active. Playback stopped.", { context: previousTrackContext });
+                // Ensure queueEnd event also carries a context if available
+                this.emit("queueEnd", previousTrackContext);
             }
         });
     }
     handleQueueEndCheck() {
+        var _a, _b;
         this.emit("debug", "AudioPlayer signaled queueEndCheck. Checking for next track.");
         if (this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.ENDED || this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.IDLE) {
-            this.playNextTrack();
+            // Try to get context from the track that just ended, if any
+            const lastTrackContext = ((_a = this.audioPlayer.getCurrentTrack()) === null || _a === void 0 ? void 0 : _a.metadata) || ((_b = this.queueManager.nowPlaying) === null || _b === void 0 ? void 0 : _b.metadata);
+            this.playNextTrack(lastTrackContext);
         }
     }
     registerCommand(commands) {
@@ -130,26 +140,26 @@ class MusicBot extends events_1.EventEmitter {
             yield this.commandManager.handleMessage(context, messageContent, this.commandPrefix);
         });
     }
-    resolveQueryToTrack(query) {
+    resolveQueryToTrack(query, commandContext) {
         return __awaiter(this, void 0, void 0, function* () {
-            this.emit("debug", `Resolving query: ${query}`);
+            this.emit("debug", `Resolving query: ${query}`, { context: commandContext });
             let trackInfo = null;
             const isUrl = query.startsWith("http://") || query.startsWith("https://");
             if (isUrl) {
                 trackInfo = (yield this.youtubeDLWrapper.getTrackInfo(query));
                 if (trackInfo && trackInfo.source === "youtube" && this.preferSoundCloudWithYouTubeLinks && trackInfo.title) {
-                    this.emit("debug", `YouTube link detected with preferSoundCloud. Searching SoundCloud for: ${trackInfo.title}`);
+                    this.emit("debug", `YouTube link detected with preferSoundCloud. Searching SoundCloud for: ${trackInfo.title}`, { context: commandContext });
                     const scQuery = trackInfo.artist ? `${trackInfo.artist} ${trackInfo.title}` : trackInfo.title;
                     const scResults = yield this.youtubeDLWrapper.searchSoundCloud(scQuery, 1);
                     if (scResults && scResults.length > 0) {
-                        this.emit("debug", `Found SoundCloud alternative for YouTube link: ${scResults[0].title}`);
+                        this.emit("debug", `Found SoundCloud alternative for YouTube link: ${scResults[0].title}`, { context: commandContext });
                         trackInfo = scResults[0];
                     }
                 }
             }
             else {
                 for (const source of this.fallbackSearchOrder) {
-                    this.emit("debug", `Searching on ${source} for: ${query}`);
+                    this.emit("debug", `Searching on ${source} for: ${query}`, { context: commandContext });
                     if (source === "spotify" && this.spotifyClient) {
                         const spotifyResults = yield this.spotifyClient.searchTracks(query, 1);
                         if (spotifyResults && spotifyResults.length > 0) {
@@ -173,62 +183,71 @@ class MusicBot extends events_1.EventEmitter {
                     }
                 }
             }
+            if (trackInfo && commandContext) {
+                trackInfo.metadata = commandContext; // Ensure metadata is set if context is available
+            }
             return trackInfo;
         });
     }
     play(query_1) {
-        return __awaiter(this, arguments, void 0, function* (query, priority = false) {
-            this.emit("debug", `Programmatic play request for query: ${query}`);
-            const trackInfo = yield this.resolveQueryToTrack(query);
+        return __awaiter(this, arguments, void 0, function* (query, priority = false, commandContext) {
+            this.emit("debug", `Programmatic play request for query: ${query}`, { context: commandContext });
+            const trackInfo = yield this.resolveQueryToTrack(query, commandContext);
             if (!trackInfo || !trackInfo.url) {
-                this.emit("trackError", new Error(`Could not find a track for query: ${query}`), null);
+                this.emit("trackError", new Error(`Could not find a track for query: ${query}`), null, commandContext);
                 return null;
+            }
+            // Ensure metadata is set from the command context if available
+            if (commandContext && !trackInfo.metadata) {
+                trackInfo.metadata = commandContext;
             }
             if (!trackInfo.streamUrl && trackInfo.source !== "spotify") {
                 const streamUrlResult = yield this.youtubeDLWrapper.getStreamUrl(trackInfo.url);
                 trackInfo.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
             }
             if (trackInfo.source !== "spotify" && !trackInfo.streamUrl) {
-                this.emit("trackError", new Error(`Failed to get stream URL for ${trackInfo.title}`), trackInfo);
+                this.emit("trackError", new Error(`Failed to get stream URL for ${trackInfo.title}`), trackInfo, commandContext);
                 return null;
             }
-            this.queueManager.add(trackInfo, priority);
+            this.queueManager.add(trackInfo, priority); // trackInfo should have metadata
             if (this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.IDLE || this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.ENDED) {
-                this.playNextTrack();
+                this.playNextTrack(commandContext || trackInfo.metadata); // Pass context for the next play
             }
             return trackInfo;
         });
     }
-    skip() {
+    skip(context) {
         if (this.audioPlayer.getStatus() !== AudioPlayer_1.PlayerStatus.IDLE) {
             const skippedTrack = this.audioPlayer.getCurrentTrack();
             this.audioPlayer.stop();
-            this.emit("trackEnd", skippedTrack, "skipped");
+            this.emit("trackEnd", skippedTrack, "skipped", context || (skippedTrack === null || skippedTrack === void 0 ? void 0 : skippedTrack.metadata));
         }
         else {
-            this.emit("debug", "Skip called but player is idle.");
+            this.emit("debug", "Skip called but player is idle.", { context });
         }
     }
-    pause() {
-        this.audioPlayer.pause();
+    pause(context) {
+        this.audioPlayer.pause(); // AudioPlayer will emit paused event with metadata
     }
-    resume() {
-        this.audioPlayer.resume();
+    resume(context) {
+        this.audioPlayer.resume(); // AudioPlayer will emit resumed event with metadata
     }
-    stop() {
-        this.queueManager.clear();
-        this.audioPlayer.stop();
+    stop(context) {
+        this.queueManager.clear(context);
+        this.audioPlayer.stop(); // AudioPlayer will emit stopped event with metadata
     }
-    setVolume(volume) {
-        this.audioPlayer.setVolume(volume);
+    setVolume(volume, context) {
+        this.audioPlayer.setVolume(volume); // AudioPlayer will emit volumeChanged event with metadata
     }
-    setLoop(mode) {
-        this.queueManager.setLoopMode(mode);
+    setLoop(mode, context) {
+        this.queueManager.setLoopMode(mode, context);
     }
-    shuffleQueue() {
-        this.queueManager.shuffle();
+    shuffleQueue(context) {
+        this.queueManager.shuffle(context);
     }
-    removeFromQueue(position) {
+    removeFromQueue(position, context) {
+        // QueueManager.remove already emits trackRemoved with metadata
+        // If we need to emit another event from MusicBot, we'd need the context here.
         return this.queueManager.remove(position);
     }
     getQueue() {

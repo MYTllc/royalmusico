@@ -12,25 +12,18 @@ class QueueManager extends events_1.EventEmitter {
     constructor(options) {
         super();
         this.queue = [];
-        this.history = []; // For 'previous' command or replaying history
+        this.history = [];
         this.nowPlaying = null;
         this.maxSize = (options === null || options === void 0 ? void 0 : options.maxSize) || 200;
         this.loopMode = (options === null || options === void 0 ? void 0 : options.defaultLoop) || LoopMode.NONE;
     }
-    /**
-     * Adds a track or multiple tracks to the queue.
-     * @param {PlayableTrack | PlayableTrack[]} tracks The track(s) to add.
-     * @param {boolean} [priority=false] Whether to add to the front of the queue.
-     * @returns {number} The new queue size.
-     */
     add(tracks, priority = false) {
+        var _a;
         const tracksToAdd = Array.isArray(tracks) ? tracks : [tracks];
         if (this.queue.length + tracksToAdd.length > this.maxSize) {
-            this.emit("error", new Error(`Queue full. Cannot add ${tracksToAdd.length} tracks.`));
-            // Optionally, only add tracks until maxSize is reached
-            // tracksToAdd = tracksToAdd.slice(0, this.maxSize - this.queue.length);
-            // if (tracksToAdd.length === 0) return this.queue.length;
-            return this.queue.length; // Or throw error
+            const error = new Error(`Queue full. Cannot add ${tracksToAdd.length} tracks.`);
+            this.emit("error", error, (_a = tracksToAdd[0]) === null || _a === void 0 ? void 0 : _a.metadata); // Pass metadata of first track if available
+            return this.queue.length;
         }
         if (priority) {
             this.queue.unshift(...tracksToAdd);
@@ -38,93 +31,76 @@ class QueueManager extends events_1.EventEmitter {
         else {
             this.queue.push(...tracksToAdd);
         }
-        tracksToAdd.forEach(track => this.emit("trackAdded", track, this.queue.length));
+        // Assuming track.metadata is set before calling add (e.g., in PlayCommand)
+        tracksToAdd.forEach(track => this.emit("trackAdded", track, this.queue.length, track.metadata));
         return this.queue.length;
     }
-    /**
-     * Removes a track from the queue by its position (1-based index).
-     * @param {number} position The position of the track to remove.
-     * @returns {PlayableTrack | null} The removed track or null if not found.
-     */
     remove(position) {
+        var _a;
         if (position < 1 || position > this.queue.length) {
-            this.emit("error", new Error(`Invalid position: ${position}. Must be between 1 and ${this.queue.length}.`));
+            const error = new Error(`Invalid position: ${position}. Must be between 1 and ${this.queue.length}.`);
+            // Attempt to find a context if possible, though difficult here
+            this.emit("error", error, (_a = this.nowPlaying) === null || _a === void 0 ? void 0 : _a.metadata);
             return null;
         }
         const removedTrack = this.queue.splice(position - 1, 1)[0];
         if (removedTrack) {
-            this.emit("trackRemoved", removedTrack, this.queue.length);
+            this.emit("trackRemoved", removedTrack, this.queue.length, removedTrack.metadata);
         }
         return removedTrack || null;
     }
-    /**
-     * Gets the next track to play based on the loop mode and current queue.
-     * Updates `nowPlaying` and moves track from queue to history.
-     * @returns {PlayableTrack | null} The next track or null if queue is empty and no loop.
-     */
     getNext() {
+        var _a;
+        const previousTrackContext = (_a = this.nowPlaying) === null || _a === void 0 ? void 0 : _a.metadata;
         if (this.nowPlaying && this.loopMode === LoopMode.TRACK) {
-            // For track loop, the same track is returned. AudioPlayer should handle re-streaming it.
-            this.emit("trackLooped", this.nowPlaying);
-            return this.nowPlaying;
+            this.emit("trackLooped", this.nowPlaying, this.nowPlaying.metadata);
+            return this.nowPlaying; // metadata is already on nowPlaying
         }
         let nextTrack = null;
         if (this.queue.length > 0) {
             nextTrack = this.queue.shift();
         }
         else if (this.loopMode === LoopMode.QUEUE && this.history.length > 0) {
-            // If queue loop is on and main queue is empty, restart from history
-            this.queue = [...this.history]; // Copy history to queue
-            this.history = []; // Clear history as we are re-adding them
+            this.queue = [...this.history];
+            this.history = [];
             nextTrack = this.queue.shift();
-            this.emit("queueLooped");
+            // For queueLooped, the context might be less specific, or related to the first track of the looped queue
+            this.emit("queueLooped", nextTrack === null || nextTrack === void 0 ? void 0 : nextTrack.metadata);
         }
         if (this.nowPlaying) {
-            // Add the previously playing track to history if it's not null
-            // and it's not the same as the next track (in case of track loop)
             if (this.nowPlaying !== nextTrack) {
                 this.history.push(this.nowPlaying);
-                // Keep history size manageable if needed
-                if (this.history.length > this.maxSize) { // Or a different limit for history
+                if (this.history.length > this.maxSize) {
                     this.history.shift();
                 }
             }
         }
         this.nowPlaying = nextTrack;
         if (!this.nowPlaying && this.loopMode !== LoopMode.TRACK) {
-            // If no next track and not looping current track, emit queueEnd
-            this.emit("queueEnd");
+            this.emit("queueEnd", previousTrackContext); // Pass context of the track that just ended, or last command context
         }
-        return this.nowPlaying;
+        return this.nowPlaying; // metadata is on the track object itself
     }
-    /**
-     * Clears the queue.
-     */
-    clear() {
+    clear(context) {
         this.queue = [];
-        this.nowPlaying = null; // Also clear now playing if queue is cleared
-        // this.history = []; // Optionally clear history too
-        this.emit("queueCleared");
+        const oldNowPlaying = this.nowPlaying;
+        this.nowPlaying = null;
+        this.emit("queueCleared", context || (oldNowPlaying === null || oldNowPlaying === void 0 ? void 0 : oldNowPlaying.metadata));
     }
-    /**
-     * Shuffles the current queue.
-     */
-    shuffle() {
+    shuffle(context) {
+        var _a;
         if (this.queue.length > 1) {
             for (let i = this.queue.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
             }
-            this.emit("queueShuffled");
+            this.emit("queueShuffled", context || ((_a = this.nowPlaying) === null || _a === void 0 ? void 0 : _a.metadata));
         }
     }
-    /**
-     * Sets the loop mode for the queue.
-     * @param {LoopMode} mode The loop mode to set.
-     */
-    setLoopMode(mode) {
+    setLoopMode(mode, context) {
+        var _a;
         this.loopMode = mode;
-        this.emit("loopModeChanged", this.loopMode);
+        this.emit("loopModeChanged", this.loopMode, context || ((_a = this.nowPlaying) === null || _a === void 0 ? void 0 : _a.metadata));
     }
     getLoopMode() {
         return this.loopMode;

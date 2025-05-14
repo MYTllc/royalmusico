@@ -58,10 +58,11 @@ class PlayCommand {
                     }
                 }
                 if (!trackInfo || !trackInfo.url) {
-                    // Use commandError event as 'error' is not a valid key for MusicBotEvents
                     musicBot.emit("commandError", this, new Error(`Could not find a track for query: ${query}`), context);
                     return `Could not find a track for \"${query}\". Try a different query or URL.`;
                 }
+                // Assign context to metadata before fetching stream URL or adding to queue
+                trackInfo.metadata = context;
                 if (!trackInfo.streamUrl) {
                     musicBot.emit("debug", `Fetching stream URL for: ${trackInfo.title}`, context);
                     const streamUrlResult = yield ytdlWrapper.getStreamUrl(trackInfo.url);
@@ -71,9 +72,9 @@ class PlayCommand {
                         return `Failed to get a playable stream for \"${trackInfo.title}\".`;
                     }
                 }
-                queueManager.add(trackInfo);
+                queueManager.add(trackInfo); // trackInfo now has metadata
                 if (audioPlayer.getStatus() === "idle" || audioPlayer.getStatus() === "ended") {
-                    const nextTrack = queueManager.getNext();
+                    const nextTrack = queueManager.getNext(); // This track will also have metadata if set correctly in QueueManager
                     if (nextTrack) {
                         yield audioPlayer.play(nextTrack);
                     }

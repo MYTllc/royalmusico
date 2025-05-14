@@ -56,16 +56,16 @@ declare class MusicBot extends EventEmitter {
     private handleQueueEndCheck;
     registerCommand(commands: Command | Command[]): void;
     handleMessage(messageContent: string, platformContext?: Partial<CommandContext>): Promise<void>;
-    resolveQueryToTrack(query: string): Promise<PlayableTrack | null>;
-    play(query: string, priority?: boolean): Promise<PlayableTrack | null>;
-    skip(): void;
-    pause(): void;
-    resume(): void;
-    stop(): void;
-    setVolume(volume: number): void;
-    setLoop(mode: LoopMode): void;
-    shuffleQueue(): void;
-    removeFromQueue(position: number): PlayableTrack | null;
+    resolveQueryToTrack(query: string, commandContext?: CommandContext): Promise<PlayableTrack | null>;
+    play(query: string, priority?: boolean, commandContext?: CommandContext): Promise<PlayableTrack | null>;
+    skip(context?: CommandContext): void;
+    pause(context?: CommandContext): void;
+    resume(context?: CommandContext): void;
+    stop(context?: CommandContext): void;
+    setVolume(volume: number, context?: CommandContext): void;
+    setLoop(mode: LoopMode, context?: CommandContext): void;
+    shuffleQueue(context?: CommandContext): void;
+    removeFromQueue(position: number, context?: CommandContext): PlayableTrack | null;
     getQueue(): Readonly<PlayableTrack[]>;
     getCurrentTrack(): PlayableTrack | null;
 }
