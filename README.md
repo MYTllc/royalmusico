@@ -41,7 +41,11 @@
 ```bash
 npm install royalmusico
 # أو
+<<<<<<< HEAD
 yarn royalmusico
+=======
+yarn add royalmusico
+>>>>>>> 21602938145d27491bfe4d351999c16954c576c0
 ```
 
 تأكد أيضًا من تثبيت `yt-dlp` على نظامك وأن يكون متاحًا في متغير `PATH` الخاص بالنظام. يمكنك تنزيله من [الموقع الرسمي لـ yt-dlp](https://github.com/yt-dlp/yt-dlp).
