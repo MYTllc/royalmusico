@@ -31,8 +31,8 @@ export declare class CommandManager {
     /**
      * Parses a raw message string and attempts to execute a command.
      * @param {CommandContext} context The context for command execution.
-     * @param {string} rawMessage The raw message string (e.g., "!play some song").
+     * @param {any} rawMessage The raw message content. Should be a string (e.g., "!play some song").
      * @param {string} prefix The command prefix (e.g., "!").
      */
-    handleMessage(context: CommandContext, rawMessage: string, prefix: string): Promise<void>;
+    handleMessage(context: CommandContext, rawMessage: any, prefix: string): Promise<void>;
 }

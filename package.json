@@ -1,6 +1,6 @@
 {
   "name": "royalmusico",
-  "version": "1.2.0",
+  "version": "1.2.2-patch2",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

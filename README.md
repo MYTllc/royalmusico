@@ -39,9 +39,9 @@
 لتثبيت المكتبة، استخدم مدير الحزم npm أو yarn:
 
 ```bash
-npm install music-bot-library
+npm install royalmusico
 # أو
-yarn add music-bot-library
+yarn royalmusico
 ```
 
 تأكد أيضًا من تثبيت `yt-dlp` على نظامك وأن يكون متاحًا في متغير `PATH` الخاص بالنظام. يمكنك تنزيله من [الموقع الرسمي لـ yt-dlp](https://github.com/yt-dlp/yt-dlp).

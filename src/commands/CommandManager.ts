@@ -51,7 +51,7 @@ export class CommandManager {
         this.aliases.set(alias.toLowerCase(), command.name.toLowerCase());
       });
     }
-    console.log(`Command registered: ${command.name}`);
+    // console.log(`Command registered: ${command.name}`); // Reduced console noise for library use
   }
 
   public getCommand(name: string): Command | undefined {
@@ -73,15 +73,29 @@ export class CommandManager {
   /**
    * Parses a raw message string and attempts to execute a command.
    * @param {CommandContext} context The context for command execution.
-   * @param {string} rawMessage The raw message string (e.g., "!play some song").
+   * @param {any} rawMessage The raw message content. Should be a string (e.g., "!play some song").
    * @param {string} prefix The command prefix (e.g., "!").
    */
-  public async handleMessage(context: CommandContext, rawMessage: string, prefix: string): Promise<void> {
-    if (!rawMessage.startsWith(prefix)) {
+  public async handleMessage(context: CommandContext, rawMessage: any, prefix: string): Promise<void> {
+    let messageContent: string;
+
+    if (typeof rawMessage === 'string') {
+      messageContent = rawMessage;
+    } else if (rawMessage && typeof rawMessage.content === 'string') {
+      // Attempt to extract content if it's an object with a 'content' property (e.g., Discord.js Message)
+      messageContent = rawMessage.content;
+      context.musicBot.emit("debug", "Received message object, extracted content for command processing.", rawMessage, context);
+    } else {
+      console.error("CommandManager Error: rawMessage is not a string and does not have a .content property. Received:", rawMessage);
+      context.musicBot.emit("commandError", null, new Error(`Invalid message format received by CommandManager. Expected string or object with 'content' property.`), context);
+      return;
+    }
+
+    if (!messageContent.startsWith(prefix)) {
       return; // Not a command
     }
 
-    const args = rawMessage.slice(prefix.length).trim().split(/\s+/);
+    const args = messageContent.slice(prefix.length).trim().split(/\s+/);
     const commandName = args.shift()?.toLowerCase();
 
     if (!commandName) {
@@ -92,17 +106,14 @@ export class CommandManager {
 
     if (command) {
       try {
-        // Basic argument validation (can be expanded based on command.args definition)
         if (command.args) {
             let currentArgIndex = 0;
             for (const argDef of command.args) {
                 if (argDef.required && !args[currentArgIndex]) {
-                    // musicBot.sendMessage(context.channelId, `Missing required argument: ${argDef.name}. Usage: ${command.usage || command.name}`);
                     console.error(`Missing required argument: ${argDef.name} for command ${command.name}`);
-                    context.musicBot.emit("commandError", command, new Error(`Missing required argument: ${argDef.name}`), context);
+                    context.musicBot.emit("commandError", command, new Error(`Missing required argument: ${argDef.name}. Usage: ${command.usage || command.name}`), context);
                     return;
                 }
-                // Further type checking can be added here
                 currentArgIndex++;
             }
         }
@@ -110,11 +121,9 @@ export class CommandManager {
         context.musicBot.emit("commandExecuted", command, context);
       } catch (error) {
         console.error(`Error executing command "${command.name}":`, error);
-        // musicBot.sendMessage(context.channelId, `An error occurred while executing ${command.name}.`);
         context.musicBot.emit("commandError", command, error as Error, context);
       }
     } else {
-      // musicBot.sendMessage(context.channelId, `Unknown command: ${commandName}`);
       context.musicBot.emit("unknownCommand", commandName, context);
       console.log(`Unknown command: ${commandName}`);
     }
