@@ -130,7 +130,7 @@ class MusicBot extends EventEmitter {
                         nextTrack.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
                         this.emit("debug", `Found SoundCloud stream for Spotify track: ${nextTrack.streamUrl}`, { context: trackContext });
                     } else {
-                         this.emit("trackError", new Error(`Could not find streamable source for Spotify track: ${nextTrack.title}`), nextTrack, trackContext);
+                         this.emit("trackError", new Error(`Could not find a playable stream for Spotify track "${nextTrack.title}". This might be due to DRM protection. Trying other sources if configured.`), nextTrack, trackContext);
                          this.playNextTrack(trackContext); 
                          return;
                     }

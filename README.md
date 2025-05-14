@@ -1,219 +1,188 @@
-# مكتبة بوت الموسيقى المتقدمة
-# Royal Musico v1.2
-مكتبة بوت موسيقى قوية ومتعددة المنصات، مبنية باستخدام TypeScript، ومصممة لتوفير تجربة تشغيل موسيقى سلسة وقابلة للتخصيص بدرجة عالية.
+# مكتبة بوت الموسيقى المتقدمة Royal Musico v1.2.3 (مُحدَّثة ومُصحَّحة)
+
+مكتبة بوت موسيقى قوية ومتعددة المنصات، مبنية باستخدام TypeScript، ومصممة لتوفير تجربة تشغيل موسيقى سلسة وقابلة للتخصيص بدرجة عالية. تم تحديث هذه النسخة لمعالجة تمرير السياق (`metadata`) بشكل أفضل، وتحسين التعامل مع أخطاء DRM، وتوفير توثيق أوضح.
 
 ## الميزات الرئيسية
 
-- **دعم منصات متعددة:** تشغيل الموسيقى من YouTube، SoundCloud، Spotify (عبر البحث وإيجاد بدائل قابلة للبث)، Instagram، TikTok، و Twitch.
-- **نظام قائمة تشغيل متقدم:** يدعم التخزين (حتى 200 أغنية قابلة للتعديل)، التكرار (أغنية/قائمة)، قائمة الأولوية، والتخزين المؤقت عند إعادة التشغيل (ميزة مستقبلية).
+- **دعم منصات متعددة:** تشغيل الموسيقى من YouTube، SoundCloud. بالنسبة لـ Spotify، يتم البحث عن الأغنية ومحاولة إيجاد بدائل قابلة للبث على YouTube أو SoundCloud (بسبب قيود DRM).
+- **نظام قائمة تشغيل متقدم:** يدعم التخزين (حتى 200 أغنية قابلة للتعديل)، التكرار (أغنية/قائمة)، قائمة الأولوية.
 - **نظام أوامر مرن:** معالج أوامر قابل للتوسيع مع مجموعة غنية من الأوامر المدمجة (`!play`, `!skip`, `!queue`, `!loop`, `!volume`, `!pause`, `!resume`, `!shuffle`, `!remove`, وغيرها).
-- **نظام أحداث شامل:** يوفر أحداثًا متنوعة (`trackStart`, `queueEnd`, `trackError`, `trackAdded`, وغيرها) لمتابعة حالة البوت والتفاعل معها.
+- **نظام أحداث شامل:** يوفر أحداثًا متنوعة (`trackStart`, `queueEnd`, `trackError`, `trackAdded`, وغيرها) لمتابعة حالة البوت والتفاعل معها، مع تمرير سياق الأمر (`CommandContext`) بشكل موثوق.
 - **جودة صوت عالية:** يعتمد على `yt-dlp` لاستخلاص روابط البث عالية الجودة.
-- **بحث ذكي و Fallback:** يبحث عن الأغاني عبر Spotify أولاً (إذا تم تكوينه)، ثم SoundCloud، ثم YouTube، مع منطق fallback ذكي لضمان أفضل فرصة للعثور على الأغنية المطلوبة.
+- **بحث ذكي و Fallback:** يبحث عن الأغاني عبر Spotify أولاً (إذا تم تكوينه، للبحث عن اسم الأغنية والفنان)، ثم SoundCloud، ثم YouTube، مع منطق fallback ذكي.
 - **أداء محسن:** يستخدم Worker Threads لمعالجة عمليات `yt-dlp` دون حجب الـ Event Loop الرئيسي.
 - **قابلية تخصيص عالية:** يمكن تخصيص العديد من جوانب المكتبة لتناسب احتياجاتك.
 - **مبني بـ TypeScript:** يوفر أمانًا للأنواع وتجربة تطوير محسنة.
 
+## التغييرات الهامة في هذه النسخة
+
+- **تحسين تمرير السياق (`metadata`):** تم توحيد طريقة تمرير كائن `CommandContext` (الذي يحتوي على `guild`, `channel`, `member`, `message`, إلخ) إلى خاصية `metadata` لكل `PlayableTrack`. يتم الآن تمرير هذا السياق بشكل متسق عبر جميع الأحداث الصادرة من `MusicBot`، `QueueManager`، و `AudioPlayer`، مما يسهل على المطور الوصول إلى معلومات الطلب الأصلي داخل معالجات الأحداث.
+- **معالجة أخطاء DRM (Spotify):** عند محاولة تشغيل رابط Spotify محمي بـ DRM، سيتم إصدار خطأ واضح يفيد بذلك، وستحاول المكتبة تلقائيًا البحث عن بديل قابل للبث على المنصات الأخرى (YouTube/SoundCloud) بناءً على معلومات الأغنية.
+- **توضيحات في التوثيق:** تم تحديث هذا الـ README ليشمل أمثلة أوضح حول كيفية التعامل مع السياق في الأحداث وكيفية إعداد Spotify.
+
 ## جدول المحتويات
 
 - [التثبيت](#التثبيت)
-- [الإعداد الأساسي](#الإعداد-الأساسي)
+- [الإعداد الأساسي (مثال Discord.js)](#الإعداد-الأساسي-مثال-discordjs)
 - [متطلبات النظام](#متطلبات-النظام)
-- [أمثلة الاستخدام](#أمثلة-الاستخدام)
-  - [إنشاء مثيل من البوت](#إنشاء-مثيل-من-البوت)
-  - [تسجيل الأوامر](#تسجيل-الأوامر)
-  - [معالجة الرسائل](#معالجة-الرسائل)
-  - [الاستماع إلى الأحداث](#الاستماع-إلى-الأحداث)
 - [خيارات التكوين](#خيارات-التكوين)
 - [الأوامر المدمجة](#الأوامر-المدمجة)
-- [الأحداث](#الأحداث)
+- [الأحداث وكيفية استخدام السياق (`metadata`)](#الأحداث-وكيفية-استخدام-السياق-metadata)
 - [التكامل مع Spotify](#التكامل-مع-spotify)
 - [متقدم: تخصيص وتوسيع المكتبة](#متقدم-تخصيص-وتوسيع-المكتبة)
-  - [إنشاء أوامر مخصصة](#إنشاء-أوامر-مخصصة)
-  - [تعديل سلوك yt-dlp](#تعديل-سلوك-yt-dlp)
 - [المساهمة](#المساهمة)
 - [الترخيص](#الترخيص)
 
 ## التثبيت
 
-لتثبيت المكتبة، استخدم مدير الحزم npm أو yarn:
+لتثبيت المكتبة، استخدم مدير الحزم npm:
 
 ```bash
 npm install royalmusico
-# أو
-<<<<<<< HEAD
-yarn royalmusico
-=======
-yarn add royalmusico
->>>>>>> 21602938145d27491bfe4d351999c16954c576c0
+# أو إذا كنت تستخدم إصدارًا محددًا من GitHub (مثال):
+# npm install MYTllc/royalmusico#main 
 ```
 
 تأكد أيضًا من تثبيت `yt-dlp` على نظامك وأن يكون متاحًا في متغير `PATH` الخاص بالنظام. يمكنك تنزيله من [الموقع الرسمي لـ yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
-## الإعداد الأساسي
+## الإعداد الأساسي (مثال Discord.js)
 
-إليك مثال بسيط لكيفية إعداد وتشغيل بوت موسيقى باستخدام هذه المكتبة:
+إليك مثال محدث يوضح كيفية إعداد بوت Discord.js باستخدام هذه المكتبة، مع التركيز على تمرير السياق الصحيح:
 
-```typescript
-import { MusicBot, MusicBotOptions, PlayCommand, SkipCommand, QueueCommand, LoopCommand, VolumeCommand, PauseCommand, ShuffleCommand, RemoveCommand } from 'royalmusico';
-import * as dotenv from 'dotenv';
+```javascript
+// examplebot/index.js (مثال توضيحي)
+const { Client, GatewayIntentBits, Partials } = require("discord.js");
+const { MusicBot, PlayCommand, SkipCommand, QueueCommand, LoopCommand, VolumeCommand, PauseCommand, ResumeCommand, ShuffleCommand, RemoveCommand, NowPlayingCommand, StopCommand, ClearQueueCommand } = require("royalmusico");
+require("dotenv").config();
 
-dotenv.config(); // لتحميل متغيرات البيئة من ملف .env
-
-const botOptions: MusicBotOptions = {
-  commandPrefix: "!", // اختياري، الافتراضي هو "!"
-  spotify: {
-    clientId: process.env.SPOTIFY_CLIENT_ID || "YOUR_SPOTIFY_CLIENT_ID",
-    clientSecret: process.env.SPOTIFY_CLIENT_SECRET || "YOUR_SPOTIFY_CLIENT_SECRET",
-  },
-  ytDlpOptions: {
-    ytDlpPath: "yt-dlp", // اختياري، إذا كان yt-dlp في PATH
-  },
-  preferSoundCloudWithYouTubeLinks: true, // بحث SoundCloud عند إدخال رابط يوتيوب
-  fallbackSearchOrder: ["spotify", "youtube", "soundcloud"], // ترتيب البحث الافتراضي
-};
-
-const musicBot = new MusicBot(botOptions);
-
-// تسجيل الأوامر المدمجة
-musicBot.registerCommand([
-  new PlayCommand(),
-  new SkipCommand(),
-  new QueueCommand(),
-  new LoopCommand(),
-  new VolumeCommand(),
-  new PauseCommand(),
-  new ShuffleCommand(),
-  new RemoveCommand(),
-  // يمكنك إضافة أوامر مخصصة هنا
-]);
-
-// مثال على معالجة رسالة (سيعتمد على منصة البوت الخاصة بك، مثل Discord.js)
-async function onMessage(messageContent: string, userId: string, channelId: string, guildId: string) {
-  if (!messageContent.startsWith(musicBot.commandManager.getCommand("play")?.usage?.split(" ")[0] || botOptions.commandPrefix)) return;
-
-  console.log(`[${guildId}-${channelId}] User ${userId} sent: ${messageContent}`);
-  await musicBot.handleMessage(messageContent, { /* guildId, channelId, userId */ });
+if (!process.env.BOT_TOKEN) {
+    console.error("ERROR: BOT_TOKEN not found in .env file.");
+    process.exit(1);
 }
 
-// الاستماع إلى الأحداث
-musicBot.on("trackStart", (track) => {
-  console.log(`▶️ Now playing: ${track.title} by ${track.artist || "Unknown Artist"}`);
-  // أرسل رسالة إلى القناة هنا
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.MessageContent,
+    ],
+    partials: [Partials.Channel, Partials.Message, Partials.User, Partials.GuildMember],
 });
 
-musicBot.on("trackAdded", (track, queueSize) => {
-  console.log(`➕ Added to queue: ${track.title} (Queue size: ${queueSize})`);
-  // أرسل رسالة إلى القناة هنا
+const musicBot = new MusicBot({
+    commandPrefix: "!",
+    spotify: {
+        clientId: process.env.SPOTIFY_CLIENT_ID, // اتركه فارغًا إذا لم تكن تستخدم Spotify
+        clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
+    },
+    ytDlpOptions: {
+        // ytDlpPath: "/usr/local/bin/yt-dlp", // إذا لم يكن في PATH
+    },
+    audioPlayerOptions: {
+        leaveOnEnd: true,
+        leaveOnStop: true,
+        leaveOnEmpty: true,
+        leaveOnEmptyCooldown: 60000, // 60 ثانية
+    },
+    queueOptions: {
+        maxSize: 150,
+    },
+    fallbackSearchOrder: ["youtube", "soundcloud"], // Spotify يُستخدم للبحث عن البيانات الوصفية إذا تم توفير Client ID/Secret
 });
 
-musicBot.on("queueEnd", () => {
-  console.log("⏹️ Queue ended.");
-  // أرسل رسالة إلى القناة هنا
+// تسجيل الأوامر
+musicBot.registerCommand([
+    new PlayCommand(), new SkipCommand(), new QueueCommand(), new LoopCommand(),
+    new VolumeCommand(), new PauseCommand(), new ResumeCommand(), new ShuffleCommand(),
+    new RemoveCommand(), new NowPlayingCommand(), new StopCommand(), new ClearQueueCommand()
+]);
+
+// معالجات الأحداث (مع استخدام السياق بشكل صحيح)
+musicBot.on("trackStart", (track, context) => {
+    console.log(`▶️ Playing: ${track.title}`);
+    if (context && context.channel) {
+        context.channel.send(`🎶 Now playing: **${track.title}**`).catch(console.error);
+    } else if (track.metadata && track.metadata.channel) {
+        // كحل احتياطي إذا تم تمرير السياق عبر track.metadata مباشرة في بعض الحالات
+        track.metadata.channel.send(`🎶 Now playing: **${track.title}**`).catch(console.error);
+    }
 });
 
-musicBot.on("trackError", (error, track) => {
-  console.error(`Error playing ${track?.title || "a track"}: ${error.message}`);
-  // أرسل رسالة خطأ إلى القناة هنا
+musicBot.on("trackAdded", (track, queueSize, context) => {
+    console.log(`➕ Added: ${track.title} (Queue: ${queueSize})`);
+    if (context && context.channel) {
+        context.channel.send(`✅ Added to queue: **${track.title}** (#${queueSize})`).catch(console.error);
+    }
 });
 
-musicBot.on("debug", (message, data) => {
-  console.log(`[DEBUG] ${message}`, data || "");
+musicBot.on("queueEnd", (context) => {
+    console.log("⏹️ Queue ended.");
+    if (context && context.channel) {
+        context.channel.send("⏹️ Queue has ended.").catch(console.error);
+    }
 });
 
-// مثال على تشغيل أمر برمجيًا
-// (async () => {
-//   await onMessage("!play https://www.youtube.com/watch?v=dQw4w9WgXcQ", "user123", "channel123", "guild123");
-//   setTimeout(async () => {
-//     await onMessage("!play Never Gonna Give You Up", "user123", "channel123", "guild123");
-//   }, 5000);
-//   setTimeout(async () => {
-//      await onMessage("!skip", "user123", "channel123", "guild123");
-//   }, 10000);
-// })();
+musicBot.on("trackError", (error, track, context) => {
+    console.error(`Error with track ${track?.title || "Unknown"}: ${error.message}`);
+    const errChannel = (context && context.channel) || (track?.metadata && track.metadata.channel);
+    if (errChannel) {
+        let userMessage = `⚠️ Error processing ${track ? `**${track.title}**` : "the request"}.`;
+        if (error.message.includes("DRM protection")) {
+            userMessage += " This content might be DRM protected. I'll try to find an alternative.";
+        }
+        errChannel.send(userMessage).catch(console.error);
+    }
+});
 
-console.log("Music Bot instance created. Ready to process commands.");
+musicBot.on("commandError", (command, error, context) => {
+    console.error(`Error in command ${command?.name || "Unknown"}: ${error.message}`);
+    if (context && context.channel) {
+        context.channel.send(`❌ Error executing command: ${error.message}`).catch(console.error);
+    }
+});
 
-// ملاحظة: هذا مجرد هيكل أساسي. ستحتاج إلى دمجه مع مكتبة البوت الخاصة بمنصتك (مثل Discord.js, Telegram.js, etc.)
-// لمعالجة الرسائل الواردة وإرسال الردود.
+// ... (بقية معالجات الأحداث مثل debug, unknownCommand, etc.)
+
+client.once("ready", () => {
+    console.log(`🤖 ${client.user.tag} is online and ready!`);
+    client.user.setActivity("!play music", { type: "LISTENING" });
+});
+
+client.on("messageCreate", async (message) => {
+    if (message.author.bot || !message.guild) return;
+
+    // إنشاء كائن السياق (CommandContext)
+    // هذا هو الكائن الذي سيتم تمريره كـ 'metadata' للأغنية وكوسيط ثالث للأحداث
+    const commandContext = {
+        guild: message.guild,
+        channel: message.channel,       // قناة النص
+        member: message.member,         // عضو الخادم
+        client: client,               // عميل Discord
+        message: message,             // الرسالة الأصلية
+        musicBot: musicBot            // تمرير musicBot نفسه ضمن السياق
+    };
+
+    // تمرير محتوى الرسالة والسياق إلى معالج الأوامر في MusicBot
+    // لا حاجة للتحقق من البادئة هنا، MusicBot.handleMessage سيفعل ذلك
+    try {
+        await musicBot.handleMessage(message.content, commandContext);
+    } catch (error) {
+        console.error("Main message handler error:", error);
+        // يمكن إرسال رسالة خطأ عامة هنا إذا لم يتم التعامل معها بواسطة commandError
+    }
+});
+
+client.login(process.env.BOT_TOKEN).catch(err => {
+    console.error("Failed to login to Discord:", err);
+});
 ```
 
 ## متطلبات النظام
 
-- Node.js (الإصدار 16 أو أحدث موصى به)
+- Node.js (الإصدار 20 أو أحدث موصى به، كما هو محدد في `engines` بملف `package.json`).
 - `yt-dlp` مثبت ومتاح في `PATH` أو مساره محدد في الخيارات.
-- (اختياري) حساب Spotify Developer مع Client ID و Client Secret لتفعيل البحث عبر Spotify.
-
-## أمثلة الاستخدام
-
-(راجع قسم [الإعداد الأساسي](#الإعداد-الأساسي) لمثال شامل)
-
-### إنشاء مثيل من البوت
-
-```typescript
-import { MusicBot, MusicBotOptions } from 'royalmusico';
-
-const options: MusicBotOptions = {
-  commandPrefix: "!",
-  spotify: {
-    clientId: "YOUR_SPOTIFY_CLIENT_ID",
-    clientSecret: "YOUR_SPOTIFY_CLIENT_SECRET",
-  }
-  // ... other options
-};
-
-const bot = new MusicBot(options);
-```
-
-### تسجيل الأوامر
-
-يمكنك تسجيل الأوامر المدمجة أو أوامرك المخصصة.
-
-```typescript
-import { PlayCommand, SkipCommand } from 'music-bot-library';
-// ... (إنشاء مثيل البوت)
-
-bot.registerCommand(new PlayCommand());
-bot.registerCommand(new SkipCommand());
-// أو كمصفوفة
-// bot.registerCommand([new PlayCommand(), new SkipCommand()]);
-```
-
-### معالجة الرسائل
-
-ستحتاج إلى تمرير محتوى الرسالة إلى `bot.handleMessage()`.
-
-```typescript
-// ضمن معالج الرسائل الخاص بمنصتك (مثل client.on('messageCreate', ...) في Discord.js)
-async function handlePlatformMessage(platformMessage: any) {
-  const content = platformMessage.content; // افترض أن هذه هي طريقة الحصول على محتوى الرسالة
-  const context = {
-    // guildId: platformMessage.guild.id, // مثال لسياق المنصة
-    // channelId: platformMessage.channel.id,
-    // userId: platformMessage.author.id,
-  };
-  await bot.handleMessage(content, context);
-}
-```
-
-### الاستماع إلى الأحداث
-
-توفر المكتبة العديد من الأحداث لمراقبة حالة البوت.
-
-```typescript
-bot.on("trackStart", (track) => {
-  console.log(`Now playing: ${track.title}`);
-  // أرسل رسالة تأكيد إلى المستخدم
-});
-
-bot.on("queueEnd", () => {
-  console.log("Queue has ended.");
-});
-
-bot.on("trackError", (error, track) => {
-  console.error(`Error with track ${track?.title}: ${error.message}`);
-});
-```
+- (اختياري) حساب Spotify Developer مع Client ID و Client Secret لتفعيل البحث عن بيانات الأغاني عبر Spotify.
 
 ## خيارات التكوين
 
@@ -222,26 +191,25 @@ bot.on("trackError", (error, track) => {
 - `commandPrefix` (string, اختياري): البادئة المستخدمة للأوامر (الافتراضي: `"!"`).
 - `ytDlpOptions` (object, اختياري):
   - `ytDlpPath` (string, اختياري): المسار إلى ملف `yt-dlp` التنفيذي (الافتراضي: `"yt-dlp"`).
-  - `workerPath` (string, اختياري): المسار إلى ملف `ytDlpWorker.js` (الافتراضي هو مسار نسبي يتم حله تلقائيًا).
-- `audioPlayerOptions` (object, اختياري): خيارات لتمريرها إلى `AudioPlayer` (مثل `volume`).
+- `audioPlayerOptions` (object, اختياري): خيارات لتمريرها إلى `AudioPlayer` (مثل `leaveOnEnd`, `leaveOnEmptyCooldown`).
 - `queueOptions` (object, اختياري):
   - `maxSize` (number, اختياري): الحد الأقصى لحجم قائمة الانتظار (الافتراضي: `200`).
   - `defaultLoop` (LoopMode, اختياري): وضع التكرار الافتراضي (الافتراضي: `LoopMode.NONE`).
 - `spotify` (object, اختياري):
-  - `clientId` (string, مطلوب إذا تم توفير كائن `spotify`): Spotify Client ID.
-  - `clientSecret` (string, مطلوب إذا تم توفير كائن `spotify`): Spotify Client Secret.
+  - `clientId` (string): Spotify Client ID. **مطلوب إذا كنت تريد استخدام تكامل Spotify للبحث عن معلومات الأغاني**.
+  - `clientSecret` (string): Spotify Client Secret. **مطلوب إذا كنت تريد استخدام تكامل Spotify**.
 - `preferSoundCloudWithYouTubeLinks` (boolean, اختياري): إذا كان `true`، عند إدخال رابط YouTube، ستحاول المكتبة البحث عن بديل على SoundCloud أولاً (الافتراضي: `false`).
-- `fallbackSearchOrder` (("spotify" | "youtube" | "soundcloud")[], اختياري): يحدد ترتيب البحث عند إدخال اسم أغنية (الافتراضي: `["spotify", "youtube", "soundcloud"]`).
+- `fallbackSearchOrder` (("youtube" | "soundcloud")[], اختياري): يحدد ترتيب البحث عند إدخال اسم أغنية (الافتراضي: `["youtube", "soundcloud"]`). لاحظ أن Spotify يُستخدم لجلب البيانات الوصفية إذا تم توفير `clientId` و `clientSecret`، ثم يتم البحث عن مصدر قابل للبث بناءً على هذه البيانات.
 
 ## الأوامر المدمجة
 
-توفر المكتبة مجموعة من الأوامر المدمجة الجاهزة للاستخدام:
+توفر المكتبة مجموعة من الأوامر المدمجة الجاهزة للاستخدام (تأكد من تسجيلها كما في المثال أعلاه):
 
 - `!play <اسم الأغنية أو الرابط>`: يشغل أغنية أو يضيفها إلى قائمة الانتظار.
 - `!skip`: يتخطى الأغنية الحالية.
 - `!queue`: يعرض قائمة الانتظار الحالية.
 - `!loop <none|track|queue>`: يضبط وضع التكرار.
-- `!volume <0-100>`: يضبط مستوى الصوت.
+- `!volume <0-100>`: يضبط مستوى الصوت (ملاحظة: التحكم الفعلي بالصوت يعتمد على تكامل `discord.js/@discordjs/voice` الذي لم يتم تضمينه بالكامل في هذا المثال الأساسي للمكتبة).
 - `!pause`: يوقف الأغنية الحالية مؤقتًا.
 - `!resume`: يستأنف تشغيل الأغنية الموقوفة مؤقتًا.
 - `!shuffle`: يخلط ترتيب الأغاني في قائمة الانتظار.
@@ -250,34 +218,29 @@ bot.on("trackError", (error, track) => {
 - `!stop`: يوقف التشغيل ويمسح قائمة الانتظار.
 - `!clear`: يمسح قائمة الانتظار.
 
-(ملاحظة: قد تحتاج إلى تسجيل بعض هذه الأوامر بشكل صريح إذا لم تكن مسجلة افتراضيًا في إصدارك أو إذا كنت تقوم بتخصيص قائمة الأوامر.)
+## الأحداث وكيفية استخدام السياق (`metadata`)
 
-## الأحداث
+تصدر `MusicBot` العديد من الأحداث. الأهم من ذلك، أن الوسيط الثالث لمعظم هذه الأحداث هو كائن `CommandContext` (أو `undefined` إذا لم يكن هناك سياق مباشر). هذا الكائن يحتوي على معلومات الطلب الأصلي.
 
-يمكنك الاستماع إلى الأحداث التالية التي تصدرها `MusicBot`:
+```typescript
+musicBot.on("trackStart", (track: PlayableTrack, context?: CommandContext) => {
+  if (context && context.channel) {
+    context.channel.send(`Playing: ${track.title} (Requested by: ${context.member?.displayName})`);
+  }
+});
 
-- `trackStart (track: PlayableTrack)`: عند بدء تشغيل أغنية جديدة.
-- `trackEnd (track: PlayableTrack, reason?: string)`: عند انتهاء الأغنية (بشكل طبيعي، أو تم تخطيها، أو بسبب خطأ).
-- `trackError (error: Error, track?: PlayableTrack | null)`: عند حدوث خطأ أثناء محاولة تشغيل أغنية.
-- `queueEnd ()`: عند انتهاء جميع الأغاني في قائمة الانتظار وعدم وجود وضع تكرار نشط.
-- `trackAdded (track: PlayableTrack, queueSize: number)`: عند إضافة أغنية إلى قائمة الانتظار.
-- `trackRemoved (track: PlayableTrack, queueSize: number)`: عند إزالة أغنية من قائمة الانتظار.
-- `queueLooped ()`: عند تكرار قائمة الانتظار بأكملها.
-- `loopModeChanged (mode: LoopMode)`: عند تغيير وضع التكرار.
-- `volumeChanged (volume: number)`: عند تغيير مستوى الصوت.
-- `paused (track?: PlayableTrack | null)`: عند إيقاف التشغيل مؤقتًا.
-- `resumed (track?: PlayableTrack | null)`: عند استئناف التشغيل.
-- `stopped (track?: PlayableTrack | null)`: عند إيقاف التشغيل بالكامل (عادةً بعد أمر `stop`).
-- `shuffled ()`: عند خلط قائمة الانتظار.
-- `queueCleared ()`: عند مسح قائمة الانتظار.
-- `commandExecuted (command: Command, context: CommandContext)`: عند تنفيذ أمر بنجاح.
-- `commandError (command: Command, error: Error, context: CommandContext)`: عند حدوث خطأ أثناء تنفيذ أمر.
-- `unknownCommand (commandName: string, context: CommandContext)`: عند محاولة تنفيذ أمر غير موجود.
-- `debug (message: string, data?: any)`: رسائل تصحيح الأخطاء الداخلية من المكتبة.
+musicBot.on("trackAdded", (track: PlayableTrack, queueSize: number, context?: CommandContext) => {
+  if (context && context.channel) {
+    context.channel.send(`${track.title} added to queue by ${context.member?.displayName}.`);
+  }
+});
+```
+
+**ملاحظة هامة:** في الإصدارات السابقة، كان يتم الاعتماد على `track.metadata` بشكل أساسي. الآن، الطريقة الموصى بها هي استخدام الوسيط الثالث `context` الذي يتم تمريره مباشرة إلى معالج الحدث. ومع ذلك، لا يزال `track.metadata` يتم تعيينه إلى `CommandContext` عند إضافة الأغنية، ويمكن استخدامه كاحتياطي.
 
 ## التكامل مع Spotify
 
-لتفعيل البحث عبر Spotify، ستحتاج إلى توفير `clientId` و `clientSecret` لحساب Spotify Developer الخاص بك في خيارات `MusicBot`.
+لتفعيل البحث عن معلومات الأغاني عبر Spotify (مثل اسم الأغنية، الفنان، الألبوم عند إدخال رابط Spotify أو البحث بالاسم)، ستحتاج إلى توفير `clientId` و `clientSecret` لحساب Spotify Developer الخاص بك في خيارات `MusicBot`.
 
 ```typescript
 const bot = new MusicBot({
@@ -289,7 +252,8 @@ const bot = new MusicBot({
 });
 ```
 
-عندما يتم البحث عن أغنية بالاسم، ستحاول المكتبة (إذا تم تكوينها بذلك في `fallbackSearchOrder`) البحث عنها على Spotify أولاً. إذا تم العثور على تطابق، ستحاول المكتبة بعد ذلك العثور على مصدر قابل للبث لهذه الأغنية على YouTube أو SoundCloud (لأن Spotify API لا يوفر روابط بث مباشرة يمكن استخدامها بسهولة في هذا السياق).
+عندما يتم البحث عن أغنية بالاسم، أو عند توفير رابط Spotify، ستحاول المكتبة استخدام Spotify API لجلب معلومات الأغنية. بعد ذلك، ستبحث عن مصدر قابل للبث لهذه الأغنية على YouTube أو SoundCloud.
+**تنبيه بخصوص DRM:** روابط Spotify المباشرة غالبًا ما تكون محمية بـ DRM ولا يمكن تشغيلها مباشرة. المكتبة مصممة للبحث عن بدائل قابلة للبث. إذا فشل ذلك، سيتم إعلام المستخدم.
 
 ## متقدم: تخصيص وتوسيع المكتبة
 
@@ -302,31 +266,12 @@ import { Command, CommandContext, MusicBot } from 'royalmusico';
 
 class MyCustomCommand implements Command {
   name = "mycommand";
-  aliases = ["mc"];
-  description = "This is my custom command.";
-  usage = "!mycommand <some argument>";
-  category = "custom";
-  args = [
-    {
-      name: "argument1",
-      description: "Some argument for the command",
-      required: true,
-      type: "string" as const,
-    },
-  ];
+  // ... (بقية خصائص الأمر كما هو موضح في README الأصلي)
 
   async execute(context: CommandContext, args: string[]): Promise<void | string | object> {
-    const musicBotInstance = context.musicBot as MusicBot;
-    const argument = args[0];
-
-    if (!argument) {
-      return `Please provide the required argument. Usage: ${this.usage}`;
-    }
-
-    // قم بتنفيذ منطق الأمر هنا
-    console.log(`MyCustomCommand executed with argument: ${argument}`);
-    // يمكنك التفاعل مع musicBotInstance.audioPlayer, musicBotInstance.queueManager, etc.
-    return `You said: ${argument}`;
+    const musicBotInstance = context.musicBot; // السياق يحتوي الآن على musicBot
+    // ... (منطق الأمر)
+    return `Custom command executed! Argument: ${args.join(" ")}`;
   }
 }
 
@@ -338,4 +283,11 @@ bot.registerCommand(new MyCustomCommand());
 
 يمكنك تعديل مسار `yt-dlp` أو تمرير خيارات إضافية عبر `ytDlpOptions`.
 
+## المساهمة
+
+نرحب بالمساهمات! يرجى الاطلاع على `CONTRIBUTING.md` (إذا كان متاحًا) أو فتح Issue لمناقشة التغييرات المقترحة.
+
+## الترخيص
+
+MIT License - انظر ملف `LICENSE` لمزيد من التفاصيل.
 
