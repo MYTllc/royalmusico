@@ -284,4 +284,5 @@ bot.registerCommand(new MyCustomCommand());
 يمكنك تعديل مسار `yt-dlp` أو تمرير خيارات إضافية عبر `ytDlpOptions`.
 
 
-
+# JOIN OUR DISCORD SUPPORT SERVER : 
+# - https://discord.gg/cmJRM3kb

@@ -5,6 +5,8 @@ import { AudioPlayer, AudioPlayerOptions, PlayerStatus, PlayableTrack } from "..
 import { QueueManager, QueueOptions, LoopMode } from "../queue/QueueManager";
 import { CommandManager, Command, CommandContext } from "../commands/CommandManager";
 
+
+
 export interface MusicBotEvents {
   trackStart: (track: PlayableTrack, context?: CommandContext) => void;
   trackEnd: (track: PlayableTrack | null, reason?: string, context?: CommandContext) => void; 
