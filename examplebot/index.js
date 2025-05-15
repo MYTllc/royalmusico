@@ -43,7 +43,7 @@ const musicBot = new MusicBot({
 // تسجيل الأوامر المدمجة
 musicBot.registerCommand([
     new PlayCommand(), new SkipCommand(), new QueueCommand(), new LoopCommand(),
-    new VolumeCommand(), new PauseCommand(), new ResumeCommand(), new ShuffleCommand(),
+    new VolumeCommand(), new PauseCommand(), new ShuffleCommand(),
     new RemoveCommand(), new NowPlayingCommand(), new StopCommand(), new ClearQueueCommand()
 ]);
 
