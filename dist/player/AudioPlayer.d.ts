@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { EventEmitter } from "events";
 import { TrackInfo } from "../integrations/YouTubeDLWrapper";
 import { CommandContext } from "../commands/CommandManager";

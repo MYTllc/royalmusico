@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { EventEmitter } from "events";
 import { YouTubeDLWrapper, YouTubeDLWrapperOptions, TrackInfo } from "../integrations/YouTubeDLWrapper";
 import { SpotifyClient, SpotifyConfig, SpotifyTrack } from "../integrations/SpotifyClient";

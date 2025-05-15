@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { EventEmitter } from "events";
 import { PlayableTrack } from "../player/AudioPlayer";
 import { CommandContext } from "../commands/CommandManager";
