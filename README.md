@@ -283,11 +283,5 @@ bot.registerCommand(new MyCustomCommand());
 
 يمكنك تعديل مسار `yt-dlp` أو تمرير خيارات إضافية عبر `ytDlpOptions`.
 
-## المساهمة
 
-نرحب بالمساهمات! يرجى الاطلاع على `CONTRIBUTING.md` (إذا كان متاحًا) أو فتح Issue لمناقشة التغييرات المقترحة.
-
-## الترخيص
-
-MIT License - انظر ملف `LICENSE` لمزيد من التفاصيل.
 
