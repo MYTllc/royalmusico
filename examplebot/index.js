@@ -1,6 +1,6 @@
-// examplebot/index.js (النسخة المصححة والمحسنة)
+// examplebot/index.js (النسخة المصححة والمحسنة v3)
 const { Client, GatewayIntentBits, Partials } = require("discord.js");
-const { MusicBot } = require("royalmusico"); // PlayCommand وغيرها من الأوامر سيتم تحميلها ديناميكيًا
+const { MusicBot } = require("royalmusico"); 
 const fs = require("fs");
 const path = require("path");
 require("dotenv").config();
@@ -20,26 +20,28 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.User, Partials.GuildMember],
 });
 
-const musicBot = new MusicBot({
+const musicBotOptions = {
     commandPrefix: "!",
     spotify: {
-        clientId: process.env.SPOTIFY_CLIENT_ID, // اتركه فارغًا إذا لم تكن تستخدم Spotify
+        clientId: process.env.SPOTIFY_CLIENT_ID, 
         clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
     },
     ytDlpOptions: {
-        // ytDlpPath: "/usr/local/bin/yt-dlp", // قم بإلغاء التعليق وتعيين المسار إذا لم يكن yt-dlp في PATH
+        // ytDlpPath: "/usr/local/bin/yt-dlp", 
     },
     audioPlayerOptions: {
         leaveOnEnd: true,
         leaveOnStop: true,
         leaveOnEmpty: true,
-        leaveOnEmptyCooldown: 60000, // 60 ثانية
+        leaveOnEmptyCooldown: 60000, 
     },
     queueOptions: {
-        maxSize: 200, // تم زيادة الحد الأقصى
+        maxSize: 200, 
     },
     fallbackSearchOrder: ["youtube", "soundcloud"], 
-});
+};
+
+const musicBot = new MusicBot(musicBotOptions);
 
 // --- تحميل وتسجيل الأوامر ديناميكيًا ---
 const commandsPath = path.join(__dirname, "commands");
@@ -49,14 +51,11 @@ for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
     try {
         const commandModule = require(filePath);
-        // التحقق من أن الوحدة المصدرة هي فئة أمر أو كائن أمر صالح
         if (commandModule && (typeof commandModule === 'function' || (typeof commandModule === 'object' && commandModule.name && commandModule.execute))) {
-            // إذا كانت الوحدة المصدرة هي فئة (constructor)، قم بإنشاء مثيل لها
             const commandInstance = typeof commandModule === 'function' ? new commandModule() : commandModule;
             musicBot.commandManager.registerCommand(commandInstance);
             console.log(`✅ تم تحميل الأمر: ${commandInstance.name}`);
         } else if (commandModule && commandModule.default && (typeof commandModule.default === 'function' || (typeof commandModule.default === 'object' && commandModule.default.name && commandModule.default.execute))) {
-            // دعم وحدات ES Modules التي تستخدم default export
             const commandInstance = typeof commandModule.default === 'function' ? new commandModule.default() : commandModule.default;
             musicBot.commandManager.registerCommand(commandInstance);
             console.log(`✅ تم تحميل الأمر (default export): ${commandInstance.name}`);
@@ -68,7 +67,7 @@ for (const file of commandFiles) {
     }
 }
 
-// --- معالجات الأحداث (يمكنك إضافة المزيد أو تعديلها حسب الحاجة) ---
+// --- معالجات الأحداث ---
 musicBot.on("trackStart", (track, context) => {
     console.log(`▶️ يتم الآن تشغيل: ${track.title} (بطلب من: ${context?.member?.displayName || "غير متوفر"})`);
     if (context && context.channel) {
@@ -83,7 +82,7 @@ musicBot.on("trackAdded", (track, queueSize, context) => {
     }
 });
 
-musicBot.on("queueEnd", (guildId, context) => { // تم تعديل التوقيع ليشمل guildId أولاً كما هو متوقع في بعض إصدارات المكتبة
+musicBot.on("queueEnd", (guildId, context) => { 
     console.log("⏹️ انتهت قائمة الانتظار.");
     if (context && context.channel) {
         context.channel.send("⏹️ انتهت قائمة الانتظار.").catch(console.error);
@@ -127,23 +126,27 @@ musicBot.on("debug", (message, data, context) => {
 // --- إعداد عميل Discord ---
 client.once("ready", () => {
     console.log(`🤖 ${client.user.tag} متصل وجاهز!`);
-    client.user.setActivity("!play music | royalmusico v2", { type: "LISTENING" });
+    client.user.setActivity("!play music | royalmusico v3.0", { type: "LISTENING" });
 });
 
 client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild) return;
 
+    // تم تحديث بناء كائن السياق هنا
     const commandContext = {
         guild: message.guild,
-        channel: message.channel,
-        member: message.member,
-        client: client,
-        message: message,
-        musicBot: musicBot
+        guildId: message.guild.id, // <-- تمت الإضافة
+        channel: message.channel, 
+        channelId: message.channel.id, // <-- تمت الإضافة
+        member: message.member, 
+        userId: message.author.id, // <-- تمت الإضافة (معرف المستخدم الذي أرسل الأمر)
+        client: client, 
+        message: message, 
+        musicBot: musicBot 
     };
 
     try {
-        await musicBot.handleMessage(message.content, commandContext);
+        await musicBot.commandManager.handleMessage(commandContext, message.content, musicBotOptions.commandPrefix);
     } catch (error) {
         console.error("خطأ في معالج الرسائل الرئيسي:", error);
         if (commandContext.channel) {
