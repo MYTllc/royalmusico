@@ -1,117 +1,363 @@
 import { EventEmitter } from "events";
 import { Readable } from "stream";
-import { TrackInfo } from "../integrations/YouTubeDLWrapper"; // Adjust path as needed
-import { CommandContext } from "../commands/CommandManager"; // Import CommandContext
+import {
+    joinVoiceChannel,
+    createAudioPlayer,
+    createAudioResource,
+    VoiceConnectionStatus,
+    AudioPlayerStatus,
+    VoiceConnection,
+    AudioPlayer as DiscordAudioPlayer,
+    StreamType,
+    entersState,
+    NoSubscriberBehavior,
+    VoiceConnectionDisconnectReason,
+    VoiceConnectionDisconnectedState,
+    VoiceConnectionDisconnectedWebSocketState
+} from "@discordjs/voice";
+import { TrackInfo } from "../integrations/YouTubeDLWrapper"; 
+import { CommandContext } from "../commands/CommandManager";
+
+interface Emitter extends EventEmitter {
+    emit(event: string, ...args: any[]): boolean;
+}
 
 export interface AudioPlayerOptions {
-  // Placeholder for future options, e.g., volume, audio quality settings
+    defaultVolume?: number; 
+    noSubscriberBehavior?: NoSubscriberBehavior;
 }
 
 export enum PlayerStatus {
-  IDLE = "idle",
-  PLAYING = "playing",
-  PAUSED = "paused",
-  BUFFERING = "buffering", // Optional: if we want to represent buffering state
-  ENDED = "ended",
-  ERROR = "error",
+    IDLE = "idle",
+    PLAYING = "playing",
+    PAUSED = "paused",
+    BUFFERING = "buffering",
+    ENDED = "ended", 
+    ERROR = "error",
+    CONNECTING = "connecting",
+    DISCONNECTED = "disconnected"
 }
 
-/**
- * Represents a track that can be played.
- */
 export interface PlayableTrack extends TrackInfo {
-  metadata?: CommandContext; // Optional: To store context like who requested the song, from which channel, etc.
+    metadata?: CommandContext;
+    streamUrl?: string; 
 }
 
 export class AudioPlayer extends EventEmitter {
-  private currentTrack: PlayableTrack | null = null;
-  private status: PlayerStatus = PlayerStatus.IDLE;
+    private voiceConnections: Map<string, VoiceConnection> = new Map();
+    private audioPlayers: Map<string, DiscordAudioPlayer> = new Map();
+    private currentTracks: Map<string, PlayableTrack | null> = new Map();
+    private playerStatuses: Map<string, PlayerStatus> = new Map();
+    private musicBotEmitter: Emitter;
+    private options: AudioPlayerOptions;
 
-  constructor(private options?: AudioPlayerOptions) {
-    super();
-  }
-
-  public async play(track: PlayableTrack): Promise<void> {
-    if (!track.streamUrl) {
-      this.emit("error", new Error("Track has no streamable URL"), track);
-      this.status = PlayerStatus.ERROR;
-      return;
+    constructor(options?: AudioPlayerOptions, musicBotEmitter?: Emitter) {
+        super();
+        this.options = {
+            defaultVolume: 0.5, 
+            noSubscriberBehavior: NoSubscriberBehavior.Pause,
+            ...options,
+        };
+        this.musicBotEmitter = musicBotEmitter || this;
     }
 
-    this.currentTrack = track;
-    this.status = PlayerStatus.PLAYING;
-    this.emit("trackStart", this.currentTrack, this.currentTrack.metadata); // Pass metadata
-
-    console.log(`[AudioPlayer] Simulating playback of: ${track.title} from ${track.streamUrl}`);
-
-    if (track.duration) {
-      setTimeout(() => {
-        if (this.currentTrack === track && this.status === PlayerStatus.PLAYING) {
-          this.handleTrackFinish();
+    private _getGuildPlayer(guildId: string): DiscordAudioPlayer {
+        let player = this.audioPlayers.get(guildId);
+        if (!player) {
+            player = createAudioPlayer({
+                behaviors: {
+                    noSubscriber: this.options.noSubscriberBehavior || NoSubscriberBehavior.Pause,
+                },
+            });
+            this.audioPlayers.set(guildId, player);
+            this._setupPlayerEventHandlers(guildId, player);
+            this.playerStatuses.set(guildId, PlayerStatus.IDLE);
         }
-      }, track.duration * 1000);
-    } else {
-        setTimeout(() => {
-            if (this.currentTrack === track && this.status === PlayerStatus.PLAYING) {
-              this.handleTrackFinish();
+        return player;
+    }
+
+    private _setupPlayerEventHandlers(guildId: string, player: DiscordAudioPlayer): void {
+        player.on(AudioPlayerStatus.Idle, async () => {
+            const oldTrack = this.currentTracks.get(guildId);
+            this.playerStatuses.set(guildId, PlayerStatus.ENDED);
+            this.currentTracks.set(guildId, null);
+            if (oldTrack) {
+                this.emit("trackEnd", oldTrack, "finished", oldTrack.metadata);
             }
-        }, 30000); 
+            this.emit("queueEndCheck", guildId);
+        });
+
+        player.on(AudioPlayerStatus.Playing, () => {
+            this.playerStatuses.set(guildId, PlayerStatus.PLAYING);
+        });
+
+        player.on(AudioPlayerStatus.Paused, () => {
+            this.playerStatuses.set(guildId, PlayerStatus.PAUSED);
+            const track = this.currentTracks.get(guildId);
+            this.emit("pause", track, track?.metadata);
+        });
+
+        player.on(AudioPlayerStatus.Buffering, () => {
+            this.playerStatuses.set(guildId, PlayerStatus.BUFFERING);
+        });
+
+        player.on("error", (error) => {
+            const track = this.currentTracks.get(guildId);
+            this.playerStatuses.set(guildId, PlayerStatus.ERROR);
+            this.emit("error", error, track, track?.metadata);
+            this.emit("queueEndCheck", guildId); 
+        });
     }
-  }
 
-  private handleTrackFinish(): void {
-    const finishedTrack = this.currentTrack;
-    this.status = PlayerStatus.ENDED;
-    this.currentTrack = null;
-    if (finishedTrack) {
-        this.emit("trackEnd", finishedTrack, "finished", finishedTrack.metadata); // Pass metadata
+    private async _getVoiceConnection(guildId: string, channelId: string, interactionAdapterCreator: any): Promise<VoiceConnection | undefined> {
+        let connection = this.voiceConnections.get(guildId);
+        if (connection && connection.joinConfig.channelId !== channelId && connection.state.status !== VoiceConnectionStatus.Destroyed) {
+            connection.destroy();
+            this.voiceConnections.delete(guildId);
+            connection = undefined;
+        }
+
+        if (!connection || connection.state.status === VoiceConnectionStatus.Destroyed) {
+            try {
+                this.musicBotEmitter.emit("voiceConnectionUpdate", "connecting", guildId, channelId);
+                connection = joinVoiceChannel({
+                    channelId: channelId,
+                    guildId: guildId,
+                    adapterCreator: interactionAdapterCreator,
+                    selfDeaf: true,
+                });
+                this.voiceConnections.set(guildId, connection);
+                this._setupConnectionEventHandlers(guildId, connection);
+                await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+                this.musicBotEmitter.emit("voiceConnectionUpdate", "connected", guildId, channelId);
+                return connection;
+            } catch (error: any) {
+                this.musicBotEmitter.emit("voiceConnectionUpdate", "connectionFailed", guildId, channelId, error);
+                if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
+                    connection.destroy();
+                }
+                this.voiceConnections.delete(guildId);
+                this.emit("error", new Error(`Failed to join voice channel: ${error.message}`), null, { guildId, voiceChannelId: channelId } as CommandContext);
+                return undefined;
+            }
+        }
+        return connection;
     }
-    this.emit("queueEndCheck");
-  }
 
-  public pause(): void {
-    if (this.status === PlayerStatus.PLAYING) {
-      this.status = PlayerStatus.PAUSED;
-      this.emit("pause", this.currentTrack, this.currentTrack?.metadata); // Pass metadata
-      console.log("[AudioPlayer] Playback paused (simulated).");
-    } else {
-      console.warn("[AudioPlayer] Cannot pause, not currently playing.");
+    private _setupConnectionEventHandlers(guildId: string, connection: VoiceConnection): void {
+        connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState: VoiceConnectionDisconnectedState) => {
+            // The newState for a Disconnected event does not directly contain an Error object.
+            // Actual errors that cause disconnection are typically caught by the connection's 'error' event listener.
+            // Emitting undefined for the error parameter here.
+            this.musicBotEmitter.emit("voiceConnectionUpdate", "disconnected", guildId, connection.joinConfig.channelId, undefined);
+            
+            if (newState.reason === VoiceConnectionDisconnectReason.WebSocketClose && newState.closeCode === 4014) {
+                this.musicBotEmitter.emit("debug", `Disconnected from ${guildId}: probable kick/move. Waiting for potential auto-reconnect or keep-alive to handle.`);
+            } else if (connection.rejoinAttempts < 5) {
+                this.musicBotEmitter.emit("debug", `Disconnected from ${guildId}: attempting to rejoin (${connection.rejoinAttempts + 1}/5)`);
+                await new Promise(resolve => setTimeout(resolve, (connection.rejoinAttempts + 1) * 5000));
+                try {
+                  if (connection.state.status !== VoiceConnectionStatus.Destroyed && connection.state.status !== VoiceConnectionStatus.Signalling && connection.state.status !== VoiceConnectionStatus.Ready ) {
+                    connection.rejoin();
+                  }
+                } catch(e: any) {
+                  this.musicBotEmitter.emit("debug", `Disconnected from ${guildId}: rejoin failed with error: ${e?.message}. Destroying connection.`);
+                  if(connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+                }
+            } else {
+                this.musicBotEmitter.emit("debug", `Disconnected from ${guildId}: max rejoin attempts reached. Destroying connection.`);
+                if(connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+            }
+        });
+
+        connection.on(VoiceConnectionStatus.Destroyed, () => {
+            this.musicBotEmitter.emit("voiceConnectionUpdate", "destroyed", guildId, connection.joinConfig.channelId);
+            this.voiceConnections.delete(guildId);
+            const player = this.audioPlayers.get(guildId);
+            if (player) {
+                player.stop(true);
+                this.audioPlayers.delete(guildId);
+            }
+            this.currentTracks.delete(guildId);
+            this.playerStatuses.set(guildId, PlayerStatus.IDLE);
+        });
+
+        connection.on(VoiceConnectionStatus.Ready, () => {
+             this.musicBotEmitter.emit("voiceConnectionUpdate", "ready", guildId, connection.joinConfig.channelId);
+        });
     }
-  }
 
-  public resume(): void {
-    if (this.status === PlayerStatus.PAUSED) {
-      this.status = PlayerStatus.PLAYING;
-      this.emit("resume", this.currentTrack, this.currentTrack?.metadata); // Pass metadata
-      console.log("[AudioPlayer] Playback resumed (simulated).");
-    } else {
-      console.warn("[AudioPlayer] Cannot resume, not currently paused.");
+    public async play(track: PlayableTrack, context: CommandContext): Promise<void> {
+        if (!context.guildId || !context.voiceChannelId || !context.interactionAdapterCreator) {
+            this.emit("error", new Error("Guild ID, Voice Channel ID, or adapter creator missing in command context for play"), track, context);
+            this.playerStatuses.set(context.guildId || 'unknown', PlayerStatus.ERROR);
+            return;
+        }
+        const guildId = context.guildId;
+
+        const connection = await this._getVoiceConnection(guildId, context.voiceChannelId, context.interactionAdapterCreator);
+        if (!connection || connection.state.status !== VoiceConnectionStatus.Ready) {
+            this.emit("error", new Error("Failed to establish voice connection or connection not ready."), track, context);
+            this.playerStatuses.set(guildId, PlayerStatus.ERROR);
+            return;
+        }
+
+        const player = this._getGuildPlayer(guildId);
+        connection.subscribe(player);
+
+        if (!track.streamUrl) { 
+            this.emit("error", new Error("Track has no streamable URL"), track, context);
+            this.playerStatuses.set(guildId, PlayerStatus.ERROR);
+            this.emit("queueEndCheck", guildId); 
+            return;
+        }
+
+        try {
+            const resource = createAudioResource(track.streamUrl, {
+                inputType: StreamType.Arbitrary,
+                inlineVolume: true
+            });
+            if(this.options.defaultVolume && resource.volume) resource.volume.setVolume(this.options.defaultVolume);
+            
+            player.play(resource);
+            this.currentTracks.set(guildId, track);
+            this.emit("trackStart", track, context);
+        } catch (error: any) {
+            this.emit("error", error, track, context);
+            this.playerStatuses.set(guildId, PlayerStatus.ERROR);
+            this.emit("queueEndCheck", guildId);
+        }
     }
-  }
 
-  public stop(): void {
-    if (this.status !== PlayerStatus.IDLE && this.status !== PlayerStatus.ENDED) {
-      const stoppedTrack = this.currentTrack;
-      this.status = PlayerStatus.IDLE;
-      this.currentTrack = null;
-      this.emit("stop", stoppedTrack, stoppedTrack?.metadata); // Pass metadata
-      console.log("[AudioPlayer] Playback stopped (simulated).");
-    } else {
-        this.emit("debug", "Stop called but player is idle or already ended.");
+    public togglePause(guildId: string, context?: CommandContext): void {
+        const player = this.audioPlayers.get(guildId);
+        const status = this.playerStatuses.get(guildId);
+        if (!player) return;
+
+        if (status === PlayerStatus.PLAYING) {
+            player.pause();
+        } else if (status === PlayerStatus.PAUSED) {
+            player.unpause();
+        } else {
+            this.emit("debug", "TogglePause: Player not in a state to be paused/resumed", { guildId, status });
+        }
     }
-  }
+    
+    public pause(guildId: string, context?: CommandContext): void {
+        const player = this.audioPlayers.get(guildId);
+        if (player && this.playerStatuses.get(guildId) === PlayerStatus.PLAYING) {
+            player.pause();
+        }
+    }
 
-  public setVolume(volume: number): void {
-    this.emit("volumeChange", volume, this.currentTrack?.metadata); // Pass metadata
-    console.log(`[AudioPlayer] Volume set to ${volume} (simulated).`);
-  }
+    public resume(guildId: string, context?: CommandContext): void {
+        const player = this.audioPlayers.get(guildId);
+        if (player && this.playerStatuses.get(guildId) === PlayerStatus.PAUSED) {
+            player.unpause();
+        }
+    }
 
-  public getStatus(): PlayerStatus {
-    return this.status;
-  }
+    public stop(guildId: string, context?: CommandContext): PlayableTrack | null {
+        const player = this.audioPlayers.get(guildId);
+        const stoppedTrack = this.currentTracks.get(guildId) || null;
+        if (player) {
+            player.stop(true);
+        }
+        return stoppedTrack;
+    }
 
-  public getCurrentTrack(): PlayableTrack | null {
-    return this.currentTrack;
-  }
+    public destroy(guildId: string, context?: CommandContext): void {
+        this.emit("debug", `AudioPlayer: Destroy called for guild ${guildId}`, { context });
+        const connection = this.voiceConnections.get(guildId);
+        const player = this.audioPlayers.get(guildId);
+
+        if (player && player.state.status !== AudioPlayerStatus.Idle) {
+             player.stop(true);
+        }
+       
+        if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
+            connection.destroy();
+        }
+        this.audioPlayers.delete(guildId);
+        this.currentTracks.delete(guildId);
+        this.playerStatuses.set(guildId, PlayerStatus.IDLE);
+        this.voiceConnections.delete(guildId);
+        this.emit("debug", `AudioPlayer: Resources for guild ${guildId} potentially destroyed. Event handlers will confirm.`, { context });
+    }
+
+    public setVolume(guildId: string, volumePercent: number, context?: CommandContext): void {
+        const player = this.audioPlayers.get(guildId);
+        // @ts-ignore 
+        const resource = player?._state?.resource;
+        if (resource && resource.volume) {
+            resource.volume.setVolume(volumePercent / 100); 
+            const track = this.currentTracks.get(guildId);
+            this.emit("volumeChange", volumePercent, track?.metadata || context);
+        } else {
+            this.emit("debug", "SetVolume: Player not playing or resource not available for inline volume.", { guildId, volumePercent });
+        }
+    }
+
+    public getStatus(guildId: string): PlayerStatus {
+        return this.playerStatuses.get(guildId) || PlayerStatus.IDLE;
+    }
+
+    public getCurrentTrack(guildId: string): PlayableTrack | null {
+        return this.currentTracks.get(guildId) || null;
+    }
+
+    public isConnected(guildId: string): boolean {
+        const conn = this.voiceConnections.get(guildId);
+        return !!conn && (conn.state.status === VoiceConnectionStatus.Ready || conn.state.status === VoiceConnectionStatus.Signalling);
+    }
+
+    public getCurrentChannelId(guildId: string): string | undefined {
+        const conn = this.voiceConnections.get(guildId);
+        const channelId = conn?.joinConfig.channelId;
+        return channelId === null ? undefined : channelId; // Ensure null is converted to undefined
+    }
+
+    public async ensureConnected(guildId: string, channelId: string, interactionAdapterCreator?: any): Promise<boolean> {
+        if (!interactionAdapterCreator ) {
+            const currentTrackMeta = this.currentTracks.get(guildId)?.metadata;
+            if(currentTrackMeta && currentTrackMeta.interactionAdapterCreator){
+                 interactionAdapterCreator = currentTrackMeta.interactionAdapterCreator;
+            } else {
+                 this.musicBotEmitter.emit("voiceConnectionUpdate", "ensureConnectedFailedNoAdapter", guildId, channelId);
+                 this.emit("error", new Error("Cannot ensure connection: interactionAdapterCreator is missing."), null, {guildId, voiceChannelId: channelId} as CommandContext);
+                 return false;
+            }
+        }
+
+        let connection = this.voiceConnections.get(guildId);
+        if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed && connection.joinConfig.channelId === channelId) {
+            if (connection.state.status === VoiceConnectionStatus.Ready) {
+                return true;
+            }
+        }
+        const newConnection = await this._getVoiceConnection(guildId, channelId, interactionAdapterCreator);
+        return !!newConnection && newConnection.state.status === VoiceConnectionStatus.Ready;
+    }
+
+    public disconnect(guildId: string): void {
+        const connection = this.voiceConnections.get(guildId);
+        if (connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
+            connection.destroy();
+        }
+    }
+    
+    public disconnectAll(): void {
+        this.voiceConnections.forEach(conn => {
+            if (conn.state.status !== VoiceConnectionStatus.Destroyed) {
+                conn.destroy();
+            }
+        });
+        this.audioPlayers.forEach(player => player.stop(true));
+        this.voiceConnections.clear();
+        this.audioPlayers.clear();
+        this.currentTracks.clear();
+        this.playerStatuses.clear();
+        this.emit("debug", "AudioPlayer: All connections and players destroyed.");
+    }
 }
 

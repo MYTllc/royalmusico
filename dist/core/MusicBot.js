@@ -8,253 +8,466 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PlayerStatus = exports.LoopMode = exports.MusicBot = void 0;
+exports.MusicBot = void 0;
 const events_1 = require("events");
 const YouTubeDLWrapper_1 = require("../integrations/YouTubeDLWrapper");
 const SpotifyClient_1 = require("../integrations/SpotifyClient");
 const AudioPlayer_1 = require("../player/AudioPlayer");
-Object.defineProperty(exports, "PlayerStatus", { enumerable: true, get: function () { return AudioPlayer_1.PlayerStatus; } });
 const QueueManager_1 = require("../queue/QueueManager");
-Object.defineProperty(exports, "LoopMode", { enumerable: true, get: function () { return QueueManager_1.LoopMode; } });
 const CommandManager_1 = require("../commands/CommandManager");
+const node_fetch_1 = __importDefault(require("node-fetch"));
 class MusicBot extends events_1.EventEmitter {
     constructor(options) {
+        var _a;
         super();
+        this.reconnectAttempts = new Map();
         this.youtubeDLWrapper = new YouTubeDLWrapper_1.YouTubeDLWrapper(options === null || options === void 0 ? void 0 : options.ytDlpOptions);
         if (options === null || options === void 0 ? void 0 : options.spotify) {
             this.spotifyClient = new SpotifyClient_1.SpotifyClient(options.spotify);
         }
-        this.audioPlayer = new AudioPlayer_1.AudioPlayer(options === null || options === void 0 ? void 0 : options.audioPlayerOptions);
-        this.queueManager = new QueueManager_1.QueueManager(options === null || options === void 0 ? void 0 : options.queueOptions);
+        this.audioPlayer = new AudioPlayer_1.AudioPlayer(options === null || options === void 0 ? void 0 : options.audioPlayerOptions, this);
+        // TODO: Address QueueManager guild-specificity. For now, using a placeholder.
+        this.queueManager = new QueueManager_1.QueueManager("global_placeholder_guild_id", options === null || options === void 0 ? void 0 : options.queueOptions);
         this.commandManager = new CommandManager_1.CommandManager();
         this.commandPrefix = (options === null || options === void 0 ? void 0 : options.commandPrefix) || "!";
         this.preferSoundCloudWithYouTubeLinks = (options === null || options === void 0 ? void 0 : options.preferSoundCloudWithYouTubeLinks) || false;
         this.fallbackSearchOrder = (options === null || options === void 0 ? void 0 : options.fallbackSearchOrder) || ["spotify", "youtube", "soundcloud"];
+        this.webhookConfig = options === null || options === void 0 ? void 0 : options.webhookConfig;
+        this.keepAliveConfig = options === null || options === void 0 ? void 0 : options.keepAliveConfig;
         this.setupEventForwarding();
         this.setupInternalHandlers();
+        if ((_a = this.keepAliveConfig) === null || _a === void 0 ? void 0 : _a.enabled) {
+            this.initKeepAlive(this.keepAliveConfig.guildId, this.keepAliveConfig.channelId);
+        }
+    }
+    getGuildQueueManager(guildId, _options) {
+        // Placeholder: In a real multi-guild bot, this would fetch or create a QM instance for the guild.
+        // For now, it returns the single instance, assuming its methods are adapted to be guild-aware.
+        // This is a known point for future architectural refinement.
+        return this.queueManager;
+    }
+    emit(event, ...args) {
+        var _a;
+        const result = super.emit(event, ...args);
+        if (((_a = this.webhookConfig) === null || _a === void 0 ? void 0 : _a.url) && (!this.webhookConfig.eventsToReport || this.webhookConfig.eventsToReport.includes(event))) {
+            this._sendWebhookNotification(event, args).catch(err => {
+                super.emit("debug", "Failed to send webhook notification", { error: err.message, event });
+            });
+        }
+        return result;
+    }
+    _sendWebhookNotification(event, args) {
+        const _super = Object.create(null, {
+            emit: { get: () => super.emit }
+        });
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            if (!((_a = this.webhookConfig) === null || _a === void 0 ? void 0 : _a.url))
+                return;
+            const payload = { event, timestamp: new Date().toISOString(), data: args.map(arg => (arg instanceof Error ? { name: arg.name, message: arg.message, stack: arg.stack } : arg)) };
+            try {
+                yield (0, node_fetch_1.default)(this.webhookConfig.url, {
+                    method: 'POST',
+                    headers: Object.assign({ 'Content-Type': 'application/json' }, (this.webhookConfig.secret && { 'X-Webhook-Secret': this.webhookConfig.secret })),
+                    body: JSON.stringify(payload)
+                });
+                _super.emit.call(this, "debug", "Webhook notification sent successfully", { event });
+            }
+            catch (error) {
+                _super.emit.call(this, "debug", "Error sending webhook notification", { error: error.message, event });
+            }
+        });
+    }
+    initKeepAlive(guildId, channelId) {
+        var _a;
+        this.emit("debug", "KeepAlive: Initializing...", { guildId, channelId });
+        this.audioPlayer.ensureConnected(guildId, channelId)
+            .then(() => this.emit("voiceConnectionUpdate", "keepAliveConnected", guildId, channelId))
+            .catch(err => this.emit("voiceConnectionUpdate", "keepAliveConnectionFailed", guildId, channelId, err));
+        if (this.keepAliveIntervalId)
+            clearInterval(this.keepAliveIntervalId);
+        this.keepAliveIntervalId = setInterval(() => {
+            this._checkAndMaintainConnection(guildId, channelId);
+        }, ((_a = this.keepAliveConfig) === null || _a === void 0 ? void 0 : _a.reconnectInterval) || 30000);
+    }
+    _checkAndMaintainConnection(guildId, channelId) {
+        var _a, _b;
+        const maxAttempts = ((_a = this.keepAliveConfig) === null || _a === void 0 ? void 0 : _a.maxReconnectAttempts) || 5;
+        const currentAttempts = this.reconnectAttempts.get(guildId) || 0;
+        if (!this.audioPlayer.isConnected(guildId) || this.audioPlayer.getCurrentChannelId(guildId) !== channelId) {
+            this.emit("debug", "KeepAlive: Disconnected or in wrong channel. Attempting to reconnect...", { guildId, channelId, attempts: currentAttempts });
+            if (currentAttempts < maxAttempts) {
+                this.reconnectAttempts.set(guildId, currentAttempts + 1);
+                this.audioPlayer.ensureConnected(guildId, channelId)
+                    .then(() => {
+                    this.emit("voiceConnectionUpdate", "keepAliveReconnected", guildId, channelId);
+                    this.reconnectAttempts.set(guildId, 0);
+                })
+                    .catch(err => {
+                    this.emit("voiceConnectionUpdate", "keepAliveReconnectFailed", guildId, channelId, err);
+                });
+            }
+            else {
+                this.emit("debug", "KeepAlive: Max reconnect attempts reached. Stopping keep-alive for now.", { guildId, channelId });
+                if (this.keepAliveIntervalId && guildId === ((_b = this.keepAliveConfig) === null || _b === void 0 ? void 0 : _b.guildId)) {
+                    clearInterval(this.keepAliveIntervalId);
+                }
+            }
+        }
+    }
+    dispose() {
+        if (this.keepAliveIntervalId)
+            clearInterval(this.keepAliveIntervalId);
+        this.audioPlayer.disconnectAll();
+        this.removeAllListeners();
+        this.emit("debug", "MusicBot disposed.");
     }
     setupEventForwarding() {
         this.audioPlayer.on("trackStart", (track, context) => this.emit("trackStart", track, context));
         this.audioPlayer.on("trackEnd", (track, reason, context) => this.emit("trackEnd", track, reason, context));
         this.audioPlayer.on("error", (error, track, context) => this.emit("trackError", error, track, context));
-        this.audioPlayer.on("pause", (track, context) => this.emit("paused", track, context));
-        this.audioPlayer.on("resume", (track, context) => this.emit("resumed", track, context));
-        this.audioPlayer.on("stop", (track, context) => this.emit("stopped", track, context));
-        this.audioPlayer.on("volumeChange", (volume, context) => this.emit("volumeChanged", volume, context));
-        this.audioPlayer.on("queueEndCheck", () => this.handleQueueEndCheck());
+        this.audioPlayer.on("pause", (track, context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("paused", context.guildId, track, context);
+        });
+        this.audioPlayer.on("resume", (track, context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("resumed", context.guildId, track, context);
+        });
+        this.audioPlayer.on("stop", (track, context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("stopped", context.guildId, track, context);
+        });
+        this.audioPlayer.on("volumeChange", (volume, context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("volumeChanged", context.guildId, volume, context);
+        });
+        this.audioPlayer.on("queueEndCheck", (guildId) => this.handleQueueEndCheck(guildId));
+        this.audioPlayer.on("voiceConnectionUpdate", (status, guildId, channelId, error) => {
+            var _a;
+            this.emit("voiceConnectionUpdate", status, guildId, channelId, error);
+            if (status === 'disconnected' && ((_a = this.keepAliveConfig) === null || _a === void 0 ? void 0 : _a.enabled) && this.keepAliveConfig.guildId === guildId) {
+                this._checkAndMaintainConnection(guildId, this.keepAliveConfig.channelId);
+            }
+        });
         this.queueManager.on("trackAdded", (track, size, context) => this.emit("trackAdded", track, size, context));
         this.queueManager.on("trackRemoved", (track, size, context) => this.emit("trackRemoved", track, size, context));
-        this.queueManager.on("queueEnd", (context) => this.emit("queueEnd", context));
-        this.queueManager.on("queueLooped", (context) => this.emit("queueLooped", context));
-        this.queueManager.on("loopModeChanged", (mode, context) => this.emit("loopModeChanged", mode, context));
-        this.queueManager.on("queueShuffled", (context) => this.emit("shuffled", context));
-        this.queueManager.on("queueCleared", (context) => this.emit("queueCleared", context));
-        this.queueManager.on("error", (error, context) => this.emit("trackError", error, this.queueManager.nowPlaying, context));
+        this.queueManager.on("queueEnd", (context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("queueEnd", context.guildId, context);
+        });
+        this.queueManager.on("queueLooped", (context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("queueLooped", context.guildId, context);
+        });
+        this.queueManager.on("loopModeChanged", (mode, context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("loopModeChanged", context.guildId, mode, context);
+        });
+        this.queueManager.on("queueShuffled", (context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("shuffled", context.guildId, context);
+        });
+        this.queueManager.on("queueCleared", (context) => {
+            if (context === null || context === void 0 ? void 0 : context.guildId)
+                this.emit("queueCleared", context.guildId, context);
+        });
+        this.queueManager.on("error", (error, context) => {
+            var _a, _b;
+            const guildId = (context === null || context === void 0 ? void 0 : context.guildId) || ((_b = (_a = this.queueManager.nowPlaying) === null || _a === void 0 ? void 0 : _a.metadata) === null || _b === void 0 ? void 0 : _b.guildId);
+            if (guildId)
+                this.emit("trackError", error, this.queueManager.nowPlaying, context);
+        });
     }
     setupInternalHandlers() {
-        this.on("trackEnd", (_track, reason, context) => __awaiter(this, void 0, void 0, function* () {
-            this.emit("debug", `Track ended. Reason: ${reason}. Checking for next track.`, { context });
-            this.playNextTrack(context);
-        }));
-    }
-    playNextTrack(previousTrackContext) {
-        return __awaiter(this, void 0, void 0, function* () {
-            if (this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.PLAYING && this.queueManager.getLoopMode() !== QueueManager_1.LoopMode.TRACK) {
-                this.emit("debug", "Player is already playing and not in track loop. playNextTrack aborted.", { context: previousTrackContext });
+        this.on("trackEnd", (track, reason, context) => __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            const guildId = ((_a = track === null || track === void 0 ? void 0 : track.metadata) === null || _a === void 0 ? void 0 : _a.guildId) || (context === null || context === void 0 ? void 0 : context.guildId);
+            if (!guildId) {
+                this.emit("debug", "Track ended but no guildId found in context.", { track, reason, context });
                 return;
             }
-            const nextTrack = this.queueManager.getNext();
+            this.emit("debug", `Track ended for guild ${guildId}. Reason: ${reason}. Checking for next track.`, { context });
+            this.playNextTrack(guildId, context);
+        }));
+        this.on("queueEnd", (guildId, context) => {
+            var _a;
+            if (((_a = this.keepAliveConfig) === null || _a === void 0 ? void 0 : _a.enabled) && this.keepAliveConfig.guildId === guildId && this.audioPlayer.isConnected(guildId)) {
+                this.emit("debug", "Queue ended, but KeepAlive is active. Player remains connected.", { guildId, context });
+            }
+            else {
+                this.emit("debug", `Queue ended for guild ${guildId}. Player might stop if not kept alive.`, { context });
+            }
+        });
+    }
+    handleQueueEndCheck(guildId) {
+        this.emit("debug", `QueueEndCheck triggered for guild ${guildId}. Playing next track.`);
+        const currentTrack = this.audioPlayer.getCurrentTrack(guildId);
+        this.playNextTrack(guildId, currentTrack === null || currentTrack === void 0 ? void 0 : currentTrack.metadata);
+    }
+    playNextTrack(guildId, previousTrackContext) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!guildId) {
+                this.emit("debug", "playNextTrack called without guildId.", { previousTrackContext });
+                return;
+            }
+            const qm = this.getGuildQueueManager(guildId);
+            if (this.audioPlayer.getStatus(guildId) === AudioPlayer_1.PlayerStatus.PLAYING && qm.getLoopMode() !== QueueManager_1.LoopMode.TRACK) {
+                this.emit("debug", "Player is already playing and not in track loop. playNextTrack aborted.", { guildId, context: previousTrackContext });
+                return;
+            }
+            const nextTrack = qm.getNext(previousTrackContext);
             if (nextTrack) {
                 try {
-                    // Ensure metadata from the original command context is preserved or set if track is from programmatic play
-                    const trackContext = nextTrack.metadata || previousTrackContext;
-                    if (!nextTrack.metadata && trackContext) {
+                    const trackContext = Object.assign(Object.assign({}, (nextTrack.metadata || previousTrackContext || {})), { guildId });
+                    if (!nextTrack.metadata)
                         nextTrack.metadata = trackContext;
+                    if (!trackContext.voiceChannelId && this.audioPlayer.isConnected(guildId)) {
+                        trackContext.voiceChannelId = this.audioPlayer.getCurrentChannelId(guildId);
+                    }
+                    if (!trackContext.voiceChannelId) {
+                        this.emit("trackError", new Error("Cannot play next track: voiceChannelId missing and bot not in channel."), nextTrack, trackContext);
+                        this.playNextTrack(guildId, trackContext);
+                        return;
+                    }
+                    if (!trackContext.interactionAdapterCreator && (previousTrackContext === null || previousTrackContext === void 0 ? void 0 : previousTrackContext.interactionAdapterCreator)) {
+                        trackContext.interactionAdapterCreator = previousTrackContext.interactionAdapterCreator;
                     }
                     if (!nextTrack.streamUrl) {
-                        this.emit("debug", `Fetching stream URL for next track: ${nextTrack.title}`, { context: trackContext });
-                        if (nextTrack.source === "spotify") {
-                            const query = `${nextTrack.artist} ${nextTrack.title}`;
-                            this.emit("debug", `Spotify track detected, searching for streamable source for \"${query}\"`, { context: trackContext });
-                            const ytTrack = yield this.youtubeDLWrapper.getTrackInfo(`ytsearch1:${query}`);
-                            if (ytTrack && ytTrack.url) {
-                                const streamUrlResult = yield this.youtubeDLWrapper.getStreamUrl(ytTrack.url);
-                                nextTrack.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
-                                this.emit("debug", `Found YouTube stream for Spotify track: ${nextTrack.streamUrl}`, { context: trackContext });
-                            }
-                            else {
-                                const scResults = yield this.youtubeDLWrapper.searchSoundCloud(query, 1);
-                                if (scResults && scResults.length > 0 && scResults[0].url) {
-                                    const streamUrlResult = yield this.youtubeDLWrapper.getStreamUrl(scResults[0].url);
-                                    nextTrack.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
-                                    this.emit("debug", `Found SoundCloud stream for Spotify track: ${nextTrack.streamUrl}`, { context: trackContext });
-                                }
-                                else {
-                                    this.emit("trackError", new Error(`Could not find a playable stream for Spotify track "${nextTrack.title}". This might be due to DRM protection. Trying other sources if configured.`), nextTrack, trackContext);
-                                    this.playNextTrack(trackContext);
-                                    return;
-                                }
-                            }
-                        }
-                        else {
-                            const streamUrlResult = yield this.youtubeDLWrapper.getStreamUrl(nextTrack.url);
-                            nextTrack.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
-                        }
-                        if (!nextTrack.streamUrl) {
-                            this.emit("trackError", new Error(`Failed to get stream URL for ${nextTrack.title}`), nextTrack, trackContext);
-                            this.playNextTrack(trackContext);
+                        this.emit("debug", `Fetching stream URL for next track: ${nextTrack.title}`, { guildId, context: trackContext });
+                        const streamUrl = yield this._resolveStreamUrl(nextTrack, trackContext);
+                        if (!streamUrl) {
+                            this.emit("trackError", new Error(`Could not resolve stream URL for ${nextTrack.title}`), nextTrack, trackContext);
+                            this.playNextTrack(guildId, trackContext);
                             return;
                         }
+                        nextTrack.streamUrl = streamUrl;
                     }
-                    yield this.audioPlayer.play(nextTrack); // nextTrack should have its metadata correctly set
+                    yield this.audioPlayer.play(nextTrack, trackContext);
                 }
                 catch (error) {
-                    this.emit("trackError", error, nextTrack, (nextTrack === null || nextTrack === void 0 ? void 0 : nextTrack.metadata) || previousTrackContext);
-                    this.playNextTrack((nextTrack === null || nextTrack === void 0 ? void 0 : nextTrack.metadata) || previousTrackContext);
+                    this.emit("trackError", error, nextTrack, previousTrackContext);
+                    this.playNextTrack(guildId, previousTrackContext);
                 }
             }
             else {
-                this.emit("debug", "Queue is empty and no loop active. Playback stopped.", { context: previousTrackContext });
-                // Ensure queueEnd event also carries a context if available
-                this.emit("queueEnd", previousTrackContext);
+                this.emit("queueEnd", guildId, previousTrackContext);
             }
         });
     }
-    handleQueueEndCheck() {
-        var _a, _b;
-        this.emit("debug", "AudioPlayer signaled queueEndCheck. Checking for next track.");
-        if (this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.ENDED || this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.IDLE) {
-            // Try to get context from the track that just ended, if any
-            const lastTrackContext = ((_a = this.audioPlayer.getCurrentTrack()) === null || _a === void 0 ? void 0 : _a.metadata) || ((_b = this.queueManager.nowPlaying) === null || _b === void 0 ? void 0 : _b.metadata);
-            this.playNextTrack(lastTrackContext);
-        }
-    }
-    registerCommand(commands) {
-        const cmds = Array.isArray(commands) ? commands : [commands];
-        cmds.forEach(cmd => this.commandManager.registerCommand(cmd));
-    }
-    handleMessage(messageContent_1) {
-        return __awaiter(this, arguments, void 0, function* (messageContent, platformContext = {}) {
-            const context = Object.assign({ musicBot: this }, platformContext);
-            yield this.commandManager.handleMessage(context, messageContent, this.commandPrefix);
-        });
-    }
-    resolveQueryToTrack(query, commandContext) {
+    _resolveStreamUrl(track, context) {
         return __awaiter(this, void 0, void 0, function* () {
-            this.emit("debug", `Resolving query: ${query}`, { context: commandContext });
-            let trackInfo = null;
-            const isUrl = query.startsWith("http://") || query.startsWith("https://");
-            if (isUrl) {
-                trackInfo = (yield this.youtubeDLWrapper.getTrackInfo(query));
-                if (trackInfo && trackInfo.source === "youtube" && this.preferSoundCloudWithYouTubeLinks && trackInfo.title) {
-                    this.emit("debug", `YouTube link detected with preferSoundCloud. Searching SoundCloud for: ${trackInfo.title}`, { context: commandContext });
-                    const scQuery = trackInfo.artist ? `${trackInfo.artist} ${trackInfo.title}` : trackInfo.title;
-                    const scResults = yield this.youtubeDLWrapper.searchSoundCloud(scQuery, 1);
-                    if (scResults && scResults.length > 0) {
-                        this.emit("debug", `Found SoundCloud alternative for YouTube link: ${scResults[0].title}`, { context: commandContext });
-                        trackInfo = scResults[0];
+            if (track.streamUrl)
+                return track.streamUrl;
+            if (!track.url) {
+                this.emit("debug", "Track has no URL to resolve stream from", { track, context });
+                return undefined;
+            }
+            try {
+                if (track.source === "spotify" && this.spotifyClient) {
+                    const query = `${track.artist || ""} ${track.title}`.trim();
+                    this.emit("debug", `Spotify track, searching for streamable source for "${query}"`, { context });
+                    let ytTrack = yield this.youtubeDLWrapper.getTrackInfo(`ytsearch1:${query}`);
+                    if (ytTrack && ytTrack.url) {
+                        const stream = yield this.youtubeDLWrapper.getStreamUrl(ytTrack.url);
+                        if (stream)
+                            return stream; // Returns string | null, assign to string | undefined
                     }
+                    const scResults = yield this.youtubeDLWrapper.searchSoundCloud(query, 1);
+                    if (scResults && scResults.length > 0 && scResults[0].url) {
+                        const stream = yield this.youtubeDLWrapper.getStreamUrl(scResults[0].url);
+                        return stream !== null && stream !== void 0 ? stream : undefined; // Convert null to undefined
+                    }
+                    return undefined;
+                }
+                else {
+                    const stream = yield this.youtubeDLWrapper.getStreamUrl(track.url);
+                    return stream !== null && stream !== void 0 ? stream : undefined; // Convert null to undefined
                 }
             }
-            else {
-                for (const source of this.fallbackSearchOrder) {
-                    this.emit("debug", `Searching on ${source} for: ${query}`, { context: commandContext });
-                    if (source === "spotify" && this.spotifyClient) {
-                        const spotifyResults = yield this.spotifyClient.searchTracks(query, 1);
-                        if (spotifyResults && spotifyResults.length > 0) {
-                            trackInfo = spotifyResults[0];
-                            break;
-                        }
-                    }
-                    else if (source === "youtube") {
-                        const ytResult = yield this.youtubeDLWrapper.getTrackInfo(`ytsearch1:${query}`);
-                        if (ytResult) {
-                            trackInfo = ytResult;
-                            break;
-                        }
-                    }
-                    else if (source === "soundcloud") {
-                        const scResults = yield this.youtubeDLWrapper.searchSoundCloud(query, 1);
-                        if (scResults && scResults.length > 0) {
-                            trackInfo = scResults[0];
-                            break;
-                        }
-                    }
-                }
+            catch (error) {
+                this.emit("trackError", new Error(`Failed to resolve stream URL: ${error.message}`), track, context);
+                return undefined;
             }
-            if (trackInfo && commandContext) {
-                trackInfo.metadata = commandContext; // Ensure metadata is set if context is available
-            }
-            return trackInfo;
         });
     }
-    play(query_1) {
-        return __awaiter(this, arguments, void 0, function* (query, priority = false, commandContext) {
-            this.emit("debug", `Programmatic play request for query: ${query}`, { context: commandContext });
-            const trackInfo = yield this.resolveQueryToTrack(query, commandContext);
-            if (!trackInfo || !trackInfo.url) {
-                this.emit("trackError", new Error(`Could not find a track for query: ${query}`), null, commandContext);
-                return null;
+    play(query, context) {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (!context.guildId) {
+                this.emit("commandError", null, new Error("Guild ID is missing from command context."), context);
+                return;
             }
-            // Ensure metadata is set from the command context if available
-            if (commandContext && !trackInfo.metadata) {
-                trackInfo.metadata = commandContext;
+            const guildId = context.guildId;
+            const qm = this.getGuildQueueManager(guildId);
+            try {
+                let trackInfo = null;
+                let tracksInfo = [];
+                if (query.includes("spotify.com/track")) {
+                    if (!this.spotifyClient)
+                        throw new Error("Spotify client not configured.");
+                    const spotifyTrack = yield this.spotifyClient.getTrack(query);
+                    if (spotifyTrack)
+                        trackInfo = this._spotifyToTrackInfo(spotifyTrack, context);
+                }
+                else if (query.includes("spotify.com/album")) {
+                    if (!this.spotifyClient)
+                        throw new Error("Spotify client not configured.");
+                    const albumTracks = yield this.spotifyClient.getAlbumTracks(query);
+                    tracksInfo = albumTracks.map(st => this._spotifyToTrackInfo(st, context));
+                }
+                else if (query.includes("spotify.com/playlist")) {
+                    if (!this.spotifyClient)
+                        throw new Error("Spotify client not configured.");
+                    const playlistTracks = yield this.spotifyClient.getPlaylistTracks(query);
+                    tracksInfo = playlistTracks.map(st => this._spotifyToTrackInfo(st, context));
+                }
+                else if (query.includes("youtube.com/playlist") || query.includes("soundcloud.com") && query.includes("/sets/")) {
+                    tracksInfo = yield this.youtubeDLWrapper.getPlaylistTracks(query);
+                }
+                else {
+                    trackInfo = yield this.youtubeDLWrapper.getTrackInfo(query, this.preferSoundCloudWithYouTubeLinks);
+                }
+                if (trackInfo)
+                    tracksInfo.push(trackInfo);
+                if (tracksInfo.length === 0) {
+                    if (context.reply)
+                        yield context.reply({ content: "Could not find any tracks for your query.", ephemeral: true });
+                    return;
+                }
+                const playableTracks = [];
+                for (const ti of tracksInfo) {
+                    if (ti) {
+                        const playableTrack = Object.assign(Object.assign({}, ti), { metadata: context, source: ti.source || (ti.url.includes("spotify") ? "spotify" : "youtube") });
+                        playableTracks.push(playableTrack);
+                    }
+                }
+                if (playableTracks.length > 0) {
+                    qm.add(playableTracks, context);
+                    if (context.reply && playableTracks.length === 1 && playableTracks[0]) {
+                        yield context.reply({ content: `Added to queue: **${playableTracks[0].title}**`, ephemeral: false });
+                    }
+                    else if (context.reply) {
+                        yield context.reply({ content: `Added **${playableTracks.length}** tracks to the queue.`, ephemeral: false });
+                    }
+                }
+                if (this.audioPlayer.getStatus(guildId) !== AudioPlayer_1.PlayerStatus.PLAYING && this.audioPlayer.getStatus(guildId) !== AudioPlayer_1.PlayerStatus.PAUSED) {
+                    this.playNextTrack(guildId, context);
+                }
             }
-            if (!trackInfo.streamUrl && trackInfo.source !== "spotify") {
-                const streamUrlResult = yield this.youtubeDLWrapper.getStreamUrl(trackInfo.url);
-                trackInfo.streamUrl = streamUrlResult === null ? undefined : streamUrlResult;
+            catch (error) {
+                this.emit("commandError", null, error, context);
+                if (context.reply)
+                    yield context.reply({ content: `Error: ${error.message}`, ephemeral: true });
             }
-            if (trackInfo.source !== "spotify" && !trackInfo.streamUrl) {
-                this.emit("trackError", new Error(`Failed to get stream URL for ${trackInfo.title}`), trackInfo, commandContext);
-                return null;
-            }
-            this.queueManager.add(trackInfo, priority); // trackInfo should have metadata
-            if (this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.IDLE || this.audioPlayer.getStatus() === AudioPlayer_1.PlayerStatus.ENDED) {
-                this.playNextTrack(commandContext || trackInfo.metadata); // Pass context for the next play
-            }
-            return trackInfo;
         });
+    }
+    _spotifyToTrackInfo(spotifyTrack, context) {
+        var _a;
+        return {
+            title: spotifyTrack.name,
+            url: spotifyTrack.external_urls.spotify,
+            artist: spotifyTrack.artists.map(a => a.name).join(", "),
+            thumbnailUrl: (_a = spotifyTrack.album.images[0]) === null || _a === void 0 ? void 0 : _a.url,
+            duration: Math.floor(spotifyTrack.duration_ms / 1000),
+            source: "spotify",
+            metadata: context,
+        };
     }
     skip(context) {
-        if (this.audioPlayer.getStatus() !== AudioPlayer_1.PlayerStatus.IDLE) {
-            const skippedTrack = this.audioPlayer.getCurrentTrack();
-            this.audioPlayer.stop();
-            this.emit("trackEnd", skippedTrack, "skipped", context || (skippedTrack === null || skippedTrack === void 0 ? void 0 : skippedTrack.metadata));
+        if (!context.guildId)
+            return;
+        const skippedTrack = this.audioPlayer.stop(context.guildId, context);
+        if (skippedTrack && context.reply) {
+            context.reply({ content: `Skipped: **${skippedTrack.title}**`, ephemeral: false });
         }
-        else {
-            this.emit("debug", "Skip called but player is idle.", { context });
+        else if (context.reply) {
+            context.reply({ content: "Nothing to skip.", ephemeral: true });
         }
     }
-    pause(context) {
-        this.audioPlayer.pause(); // AudioPlayer will emit paused event with metadata
-    }
-    resume(context) {
-        this.audioPlayer.resume(); // AudioPlayer will emit resumed event with metadata
+    togglePause(context) {
+        if (!context.guildId)
+            return;
+        this.audioPlayer.togglePause(context.guildId, context);
     }
     stop(context) {
-        this.queueManager.clear(context);
-        this.audioPlayer.stop(); // AudioPlayer will emit stopped event with metadata
+        if (!context.guildId)
+            return;
+        const qm = this.getGuildQueueManager(context.guildId);
+        qm.clear(context);
+        this.audioPlayer.destroy(context.guildId, context);
+        if (context.reply)
+            context.reply({ content: "Player stopped and queue cleared.", ephemeral: false });
     }
     setVolume(volume, context) {
-        this.audioPlayer.setVolume(volume); // AudioPlayer will emit volumeChanged event with metadata
+        if (!context.guildId)
+            return;
+        if (volume < 0 || volume > 150) {
+            if (context.reply)
+                context.reply({ content: "Volume must be between 0 and 150.", ephemeral: true });
+            return;
+        }
+        this.audioPlayer.setVolume(context.guildId, volume, context);
+        if (context.reply)
+            context.reply({ content: `Volume set to ${volume}%`, ephemeral: false });
     }
-    setLoop(mode, context) {
-        this.queueManager.setLoopMode(mode, context);
+    getQueue(context) {
+        if (!context.guildId)
+            return [];
+        const qm = this.getGuildQueueManager(context.guildId);
+        return qm.getQueue();
+    }
+    setLoopMode(mode, context) {
+        if (!context.guildId)
+            return;
+        const qm = this.getGuildQueueManager(context.guildId);
+        qm.setLoopMode(mode, context);
+        if (context.reply)
+            context.reply({ content: `Loop mode set to: ${mode}`, ephemeral: false });
     }
     shuffleQueue(context) {
-        this.queueManager.shuffle(context);
+        if (!context.guildId)
+            return;
+        const qm = this.getGuildQueueManager(context.guildId);
+        qm.shuffle(context);
+        if (context.reply)
+            context.reply({ content: "Queue shuffled.", ephemeral: false });
     }
-    removeFromQueue(position, context) {
-        // QueueManager.remove already emits trackRemoved with metadata
-        // If we need to emit another event from MusicBot, we'd need the context here.
-        return this.queueManager.remove(position);
+    removeTrack(index, context) {
+        if (!context.guildId)
+            return null;
+        const qm = this.getGuildQueueManager(context.guildId);
+        const removed = qm.remove(index, context);
+        if (removed && context.reply) {
+            context.reply({ content: `Removed from queue: **${removed.title}**`, ephemeral: false });
+        }
+        return removed;
     }
-    getQueue() {
-        return this.queueManager.getQueue();
+    clearQueue(context) {
+        if (!context.guildId)
+            return;
+        const qm = this.getGuildQueueManager(context.guildId);
+        qm.clear(context);
+        if (context.reply)
+            context.reply({ content: "Queue cleared.", ephemeral: false });
     }
-    getCurrentTrack() {
-        return this.audioPlayer.getCurrentTrack();
+    handleCommand(commandName, args, context) {
+        const command = this.commandManager.getCommand(commandName);
+        if (command) {
+            try {
+                command.execute(this, context, args);
+                this.emit("commandExecuted", command, context);
+            }
+            catch (error) {
+                this.emit("commandError", command, error, context);
+            }
+        }
+        else {
+            this.emit("unknownCommand", commandName, context);
+        }
     }
 }
 exports.MusicBot = MusicBot;
