@@ -132,14 +132,14 @@ client.once("ready", () => {
 client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // تم تحديث بناء كائن السياق هنا
+
     const commandContext = {
         guild: message.guild,
-        guildId: message.guild.id, // <-- تمت الإضافة
+        guildId: message.guild.id, 
         channel: message.channel, 
-        channelId: message.channel.id, // <-- تمت الإضافة
+        channelId: message.channel.id,
         member: message.member, 
-        userId: message.author.id, // <-- تمت الإضافة (معرف المستخدم الذي أرسل الأمر)
+        userId: message.author.id, 
         client: client, 
         message: message, 
         musicBot: musicBot 
