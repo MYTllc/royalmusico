@@ -1,4 +1,4 @@
-// /home/ubuntu/fixed_bot_script/commands/queue.js
+
 // مثال لأمر عرض قائمة الانتظار
 
 const { QueueCommand } = require("royalmusico"); // تأكد من أن QueueCommand يتم تصديرها بهذا الاسم

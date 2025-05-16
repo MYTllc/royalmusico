@@ -1,4 +1,4 @@
-// /home/ubuntu/fixed_bot_script/commands/play.js
+
 // (النسخة المصححة v3 - استخدام PlayCommand من المكتبة مباشرة)
 
 const { PlayCommand } = require("royalmusico");
