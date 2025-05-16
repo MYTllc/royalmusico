@@ -1,7 +1,7 @@
 import { AudioPlayer, PlayerStatus, PlayableTrack } from "../../player/AudioPlayer";
 import { EventEmitter } from "events";
 
-// Mock the underlying audio library (e.g., a simple event emitter for testing)
+)
 class MockAudioResource extends EventEmitter {
   play() { setTimeout(() => this.emit("finish"), 50); } // Simulate playback finishing
   pause() {}
