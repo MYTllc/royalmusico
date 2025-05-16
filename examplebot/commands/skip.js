@@ -1,4 +1,4 @@
-// /home/ubuntu/fixed_bot_script/commands/skip.js
+
 // مثال لأمر التخطي
 
 module.exports = {
